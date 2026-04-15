@@ -150,42 +150,51 @@ def update_schedule_status(row_id, status, completed_date=None, uploaded_cms=Non
 # DEVICES
 # ─────────────────────────────────────────────────────────────
 
-def get_devices(building=None):
+def get_devices_for_building(fp_name, bldg_name):
     if not _use_supabase():
-        return _sqlite().get_devices(building)
+        return _sqlite().get_devices_for_building(fp_name, bldg_name)
 
-    query = _sb().table("devices").select("*")
+    values = []
+    if fp_name:
+        values.append(str(fp_name).strip())
+    if bldg_name:
+        values.append(str(bldg_name).strip())
 
-    if building:
-        query = query.eq("building", str(building))
+    if not values:
+        return []
 
-    res = query.execute()
+    # Supabase OR filter: building.eq.value1,building.eq.value2
+    or_filter = ",".join([f"building.eq.{v}" for v in values])
+
+    res = (
+        _sb()
+        .table("devices")
+        .select("*")
+        .or_(or_filter)
+        .order("type")
+        .order("point")
+        .execute()
+    )
     return res.data or []
 
-
-def get_devices_for_building(fp_name, building_name):
+def get_device_results(insp_id):
     if not _use_supabase():
-        return _sqlite().get_devices_for_building(fp_name, building_name)
+        return _sqlite().get_device_results(insp_id)
 
-    query = _sb().table("devices").select("*")
+    res = (
+        _sb()
+        .table("inspections")
+        .select("device_results")
+        .eq("id", insp_id)
+        .limit(1)
+        .execute()
+    )
 
-    if building_name:
-        query = query.eq("building", str(building_name))
-
-    res = query.execute()
     rows = res.data or []
+    if not rows:
+        return {}
 
-    # SAFE FILTER (no DB column dependency)
-    if fp_name:
-        fp = str(fp_name).lower()
-        rows = [
-            r for r in rows
-            if fp in str(r.get("description", "")).lower()
-            or fp in str(r.get("point", "")).lower()
-        ]
-
-    return rows
-
+    return rows[0].get("device_results") or {}
 
 # ─────────────────────────────────────────────────────────────
 # INSPECTIONS
