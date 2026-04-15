@@ -265,7 +265,7 @@ if page == "📊  Dashboard":
     scheduled = stats.get("scheduled", 0)
     done_pct = round(done / scheduled * 100) if scheduled else 0
 
-    # Metric cards
+    # Metric cards — clickable
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         st.markdown(f"""<div class="metric-card" style="--accent:#CC2929">
@@ -273,12 +273,19 @@ if page == "📊  Dashboard":
             <div class="value">{stats['total_systems']}</div>
             <div class="sub">Buildings monitored</div>
         </div>""", unsafe_allow_html=True)
+        if st.button("→ Buildings", key='card_buildings', use_container_width=True):
+            st.session_state['nav_target'] = '🏢  Buildings'
+            st.rerun()
     with c2:
         st.markdown(f"""<div class="metric-card" style="--accent:#166534">
             <div class="label">Inspections Complete</div>
             <div class="value" style="color:#166534">{stats['complete']}</div>
             <div class="sub">of {stats['scheduled']} scheduled · {done_pct}%</div>
         </div>""", unsafe_allow_html=True)
+        if st.button("→ Schedule", key='card_complete', use_container_width=True):
+            st.session_state['sched_status'] = 'Complete'
+            st.session_state['nav_target'] = '📅  Schedule'
+            st.rerun()
     with c3:
         color = '#991b1b' if stats['overdue'] > 0 else '#888'
         st.markdown(f"""<div class="metric-card" style="--accent:{color}">
@@ -286,18 +293,28 @@ if page == "📊  Dashboard":
             <div class="value" style="color:{color}">{stats['overdue']}</div>
             <div class="sub">Past scheduled date</div>
         </div>""", unsafe_allow_html=True)
+        if st.button("→ Schedule", key='card_overdue', use_container_width=True):
+            st.session_state['sched_status'] = 'Overdue'
+            st.session_state['nav_target'] = '📅  Schedule'
+            st.rerun()
     with c4:
         st.markdown(f"""<div class="metric-card" style="--accent:#1e40af">
             <div class="label">Initiating Devices</div>
             <div class="value" style="color:#1e40af">{stats['init_devices']:,}</div>
             <div class="sub">Campus-wide total</div>
         </div>""", unsafe_allow_html=True)
+        if st.button("→ Device Inventory", key='card_devices', use_container_width=True):
+            st.session_state['nav_target'] = '🔍  Device Inventory'
+            st.rerun()
     with c5:
         st.markdown(f"""<div class="metric-card" style="--accent:#854d0e">
             <div class="label">Reports Saved</div>
             <div class="value" style="color:#854d0e">{stats['reports_saved']}</div>
             <div class="sub">This cycle</div>
         </div>""", unsafe_allow_html=True)
+        if st.button("→ Inspection History", key='card_reports', use_container_width=True):
+            st.session_state['nav_target'] = '📁  Inspection History'
+            st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -331,7 +348,14 @@ if page == "📊  Dashboard":
             xaxis=dict(tickfont=dict(size=10)),
             yaxis=dict(showgrid=True, gridcolor='#f0f0f0')
         )
-        st.plotly_chart(fig, use_container_width=True)
+        chart_click = st.plotly_chart(fig, use_container_width=True,
+                                       on_select="rerun", key="monthly_chart")
+        if chart_click and chart_click.get("selection", {}).get("points"):
+            clicked_month = chart_click["selection"]["points"][0].get("x")
+            if clicked_month:
+                st.session_state['schedule_month_filter'] = clicked_month
+                st.session_state['nav_target'] = '📅  Schedule'
+                st.rerun()
 
         # Upcoming this month
         st.markdown(f'<div class="section-title">Upcoming in {cur_month}</div>', unsafe_allow_html=True)
@@ -367,7 +391,14 @@ if page == "📊  Dashboard":
                 plot_bgcolor='white', paper_bgcolor='white',
                 xaxis=dict(showgrid=False), yaxis=dict(tickfont=dict(size=10))
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            dist_click = st.plotly_chart(fig2, use_container_width=True,
+                                           on_select="rerun", key="district_chart")
+            if dist_click and dist_click.get("selection", {}).get("points"):
+                clicked_dist = dist_click["selection"]["points"][0].get("y")
+                if clicked_dist:
+                    st.session_state['buildings_district_filter'] = clicked_dist
+                    st.session_state['nav_target'] = '🏢  Buildings'
+                    st.rerun()
 
         st.markdown('<div class="section-title">Panel Types</div>', unsafe_allow_html=True)
         buildings = db.get_buildings()
@@ -387,7 +418,14 @@ if page == "📊  Dashboard":
         ))
         fig3.update_layout(height=220, margin=dict(l=0,r=0,t=0,b=0),
                            showlegend=False, paper_bgcolor='white')
-        st.plotly_chart(fig3, use_container_width=True)
+        panel_click = st.plotly_chart(fig3, use_container_width=True,
+                                       on_select="rerun", key="panel_chart")
+        if panel_click and panel_click.get("selection", {}).get("points"):
+            clicked_panel = panel_click["selection"]["points"][0].get("label")
+            if clicked_panel:
+                st.session_state['buildings_panel_filter'] = clicked_panel
+                st.session_state['nav_target'] = '🏢  Buildings'
+                st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SCHEDULE
@@ -400,6 +438,12 @@ elif page == "📅  Schedule":
           <p>Click any row to update status · Changes save instantly to the database</p>
         </div>
     </div>''', unsafe_allow_html=True)
+
+    # Pre-select month if navigated from dashboard chart click
+    if 'schedule_month_filter' in st.session_state:
+        _pre_month = st.session_state.pop('schedule_month_filter')
+        if _pre_month in MONTHS:
+            st.session_state['sched_month'] = _pre_month
 
     col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
@@ -505,15 +549,24 @@ elif page == "🏢  Buildings":
 
     buildings = db.get_buildings()
 
+    # Pre-select filters if navigated from dashboard chart click
+    if 'buildings_district_filter' in st.session_state:
+        st.session_state['bldg_dist_f'] = st.session_state.pop('buildings_district_filter')
+    if 'buildings_panel_filter' in st.session_state:
+        st.session_state['bldg_panel_f'] = st.session_state.pop('buildings_panel_filter')
+
+    _dist_opts  = ['All'] + sorted(set(b['district'] for b in buildings if b.get('district') and len(b.get('district',''))<30))
+    _panel_opts = ['All'] + sorted(set(b['panel_type'] for b in buildings if b.get('panel_type') and isinstance(b.get('panel_type'),str)))
+
     col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
         search = st.text_input("🔍  Search by name, number, district, panel type…", key='bldg_search')
     with col2:
-        dist_f = st.selectbox("District", ['All'] + sorted(set(
-            b['district'] for b in buildings if b.get('district') and len(b.get('district',''))<30)))
+        _dist_idx = _dist_opts.index(st.session_state.get('bldg_dist_f','All')) if st.session_state.get('bldg_dist_f','All') in _dist_opts else 0
+        dist_f = st.selectbox("District", _dist_opts, index=_dist_idx, key='bldg_dist_f')
     with col3:
-        panel_f = st.selectbox("Panel Type", ['All'] + sorted(set(
-            b['panel_type'] for b in buildings if b.get('panel_type') and isinstance(b.get('panel_type'),str))))
+        _panel_idx = _panel_opts.index(st.session_state.get('bldg_panel_f','All')) if st.session_state.get('bldg_panel_f','All') in _panel_opts else 0
+        panel_f = st.selectbox("Panel Type", _panel_opts, index=_panel_idx, key='bldg_panel_f')
 
     # Sort numerically (1, 2, 3... not 1, 10, 11...)
     def _bldg_sort_key(b):
