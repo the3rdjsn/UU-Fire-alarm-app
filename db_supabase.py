@@ -302,7 +302,21 @@ def get_devices(building=None):
 
 def get_device_inventory(building=None):
     return get_devices(building)
+def get_devices_for_building(fp_name, building_name):
+    if not _use_supabase():
+        import db as _s
+        return _s.get_devices_for_building(fp_name, building_name)
 
+    query = _sb().table("devices").select("*")
+
+    if building_name:
+        query = query.eq("building", str(building_name))
+
+    if fp_name:
+        query = query.eq("panel_name", str(fp_name))
+
+    res = query.execute()
+    return res.data or []
 
 # ──────────────────────────────────────────────────────────────────────────────
 # INSPECTIONS
