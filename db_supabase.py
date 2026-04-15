@@ -282,7 +282,8 @@ def delete_inspection(insp_id):
     if not _use_supabase():
         import db as _s; return _s.delete_inspection(insp_id)
 
-    _sb().table('deficiencies').delete().eq('inspection_id', insp_id).execute()
+    # In Supabase, deficiencies are stored inline as JSON on the inspections row,
+    # not in a separate deficiencies table.
     _sb().table('inspections').delete().eq('id', insp_id).execute()
 
 def update_inspection(insp_id, data, deficiencies):
