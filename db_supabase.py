@@ -191,20 +191,18 @@ def get_devices_for_building(fp_name, building_name):
 # INSPECTIONS
 # ─────────────────────────────────────────────────────────────
 
-def get_inspections():
+def get_inspections(bldg_num=None):
     if not _use_supabase():
-        return _sqlite().get_inspections()
+        return _sqlite().get_inspections(bldg_num)
 
-    res = _sb().table("inspections").select("*").execute()
+    query = _sb().table("inspections").select("*")
+
+    if bldg_num:
+        target = str(bldg_num).split(".")[0].strip()
+        query = query.eq("building", target)
+
+    res = query.execute()
     return res.data or []
-
-
-def delete_inspection(insp_id):
-    if not _use_supabase():
-        return _sqlite().delete_inspection(insp_id)
-
-    _sb().table("inspections").delete().eq("id", insp_id).execute()
-    return True
 
 
 # ─────────────────────────────────────────────────────────────
