@@ -5,8 +5,7 @@ Falls back to SQLite automatically if env vars are missing (local dev).
 """
 import os, json
 import streamlit as st
-from datetime import date, datetime
-from db_config import using_supabase, validate_db_config
+from datetime import date
 
 # ── Connection ────────────────────────────────────────────────────────────────
 def _use_supabase():
@@ -26,78 +25,6 @@ def _sb():
 # ── Init / Seed ───────────────────────────────────────────────────────────────
 MONTHS_LIST = ['January','February','March','April','May','June',
                'July','August','September','October','November','December']
-
-
-def canonicalize_district(value):
-    if value is None:
-        return ''
-    text = str(value).strip()
-    if not text or text.lower() in ('nan', 'none'):
-        return ''
-    cleaned = ' '.join(text.replace('_', ' ').split()).upper()
-    aliases = {
-        'ENGINERING': 'ENGINEERING',
-        'ENGINEERING': 'ENGINEERING',
-        'HEALTH SCIENCE': 'HEALTH SCIENCE',
-        'ACADEMIC': 'ACADEMIC',
-        'VENUES': 'VENUES',
-        'PRESIDENTS': 'PRESIDENTS',
-        'SCIENCE': 'SCIENCE',
-        'CORE': 'CORE',
-        'HRE': 'HRE',
-        'USA': 'USA',
-        'GUEST': 'GUEST',
-        'PARKING': 'PARKING',
-    }
-    return aliases.get(cleaned, cleaned)
-
-def parse_schedule_date(value):
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text or text.lower() in ('nan', 'none'):
-        return None
-    if text.upper().startswith('NEW CONSTR'):
-        return None
-    try:
-        return datetime.fromisoformat(text[:10]).date()
-    except Exception:
-        return None
-
-def infer_last_inspection_date_from_month(month_value, today=None):
-    today = today or date.today()
-    month = str(month_value or '').strip()
-    if month not in MONTHS_LIST:
-        return None
-    month_num = MONTHS_LIST.index(month) + 1
-    year = today.year - 1 if month_num > today.month else today.year
-    try:
-        return date(year, month_num, 1)
-    except Exception:
-        return None
-
-def is_schedule_overdue(row, today=None):
-    today = today or date.today()
-    status = str(row.get('status') or '').strip()
-    if status in ('Complete', 'Construction'):
-        return False
-
-    last_inspection_date = parse_schedule_date(row.get('inspection_date'))
-    if last_inspection_date is None:
-        last_inspection_date = infer_last_inspection_date_from_month(row.get('month'), today=today)
-
-    if last_inspection_date is None:
-        return False
-
-    return (today - last_inspection_date).days > 365
-    sched_date = parse_schedule_date(row.get('inspection_date'))
-    if sched_date is not None:
-        return sched_date < today
-    month = str(row.get('month') or '').strip()
-    if month in MONTHS_LIST:
-        return MONTHS_LIST.index(month) + 1 < today.month
-    return False
-
 
 def init_db(buildings, schedule, devices):
     if _use_supabase():
@@ -183,7 +110,7 @@ def _seed_supabase(buildings, schedule, devices):
                 status = 'Pending'
             rows.append({
                 'month':         s_month,
-                'bldg_num':      normalize_bldg_num(s.get('bldg_num')),
+                'bldg_num':      str(s.get('bldg_num','')).split('.')[0],
                 'building_name': s.get('building_name',''),
                 'district':      s.get('district',''),
                 'address':       s.get('address',''),
@@ -191,7 +118,7 @@ def _seed_supabase(buildings, schedule, devices):
                 'inspection_date': insp_date,
                 'status':        status,
                 'date_completed': None,
-                'uploaded_cms':  s.get('uploaded_cms','No') or 'No',
+                'uploaded_cms':  'Yes' if s.get('uploaded_cms')==1 else 'No',
                 'notes':         '',
             })
         for i in range(0, len(rows), 100):
@@ -200,12 +127,8 @@ def _seed_supabase(buildings, schedule, devices):
     # ── Devices ────────────────────────────────────────────────────────────────
     existing = sb.table('devices').select('id').limit(1).execute()
     if not existing.data:
-        rows = [{
-            'building': d['building'],
-            'type': d['type'],
-            'point': d['point'],
-            'description': d['description'],
-        } for d in devices]
+        rows = [{'building':d[0],'type':d[1],'point':d[2],
+                 'description':d[3] if len(d)>3 else ''} for d in devices]
         for i in range(0, len(rows), 500):
             sb.table('devices').insert(rows[i:i+500]).execute()
 
@@ -214,16 +137,21 @@ def refresh_overdue_statuses():
     if not _use_supabase():
         import db as _s; _s.refresh_overdue_statuses(); return
     sb = _sb()
-    today = date.today()
-    all_sched = sb.table('schedule').select('id,month,status,inspection_date').execute().data
-    for row in all_sched:
-        status = str(row.get('status') or '').strip()
-        if status in ('Complete', 'Construction', 'Overdue'):
-            continue
-        if status not in ('Pending', 'In Progress', ''):
-            continue
-        if is_schedule_overdue(row, today=today):
-            sb.table('schedule').update({'status': 'Overdue'}).eq('id', row['id']).execute()
+    cur_month = date.today().month
+    past = [m for m in MONTHS_LIST if MONTHS_LIST.index(m)+1 < cur_month]
+    future = [m for m in MONTHS_LIST if MONTHS_LIST.index(m)+1 >= cur_month]
+    if past:
+        # Mark past months as Overdue if not complete
+        all_sched = sb.table('schedule').select('id,month,status').execute().data
+        overdue_ids = [r['id'] for r in all_sched
+                       if r['month'] in past and r['status'] not in ('Complete','Construction')]
+        if overdue_ids:
+            sb.table('schedule').update({'status':'Overdue'}).in_('id', overdue_ids).execute()
+        # Un-overdue future months
+        future_ids = [r['id'] for r in all_sched
+                      if r['month'] in future and r['status'] == 'Overdue']
+        if future_ids:
+            sb.table('schedule').update({'status':'Pending'}).in_('id', future_ids).execute()
 
 # ── Buildings ─────────────────────────────────────────────────────────────────
 def get_buildings():
@@ -269,7 +197,20 @@ def get_building_image(bldg_num):
     r = _sb().table('building_images').select('image_data,image_ext').eq('bldg_num', str(bldg_num)).execute().data
     if r:
         return r[0]['image_data'], r[0]['image_ext']
-    return None, None
+    import db as _s
+    return _s.get_building_image(bldg_num)
+
+def delete_building_image(bldg_num):
+    if not _use_supabase():
+        import db as _s; return _s.delete_building_image(bldg_num)
+    sb = _sb()
+    try:
+        sb.table('building_images').delete().eq('bldg_num', str(bldg_num)).execute()
+    except Exception:
+        pass
+    import db as _s
+    return _s.delete_building_image(bldg_num)
+
 
 # ── Schedule ──────────────────────────────────────────────────────────────────
 def get_schedule(month='All'):
@@ -338,7 +279,7 @@ def get_inspections(bldg_num=None):
         import db as _s; return _s.get_inspections(bldg_num)
     q = _sb().table('inspections').select('*').order('inspection_date', desc=True)
     if bldg_num:
-        q = q.eq('bldg_num', normalize_bldg_num(bldg_num))
+        q = q.eq('bldg_num', str(bldg_num))
     data = q.execute().data
     # Parse deficiencies back to list
     for row in data:
@@ -346,14 +287,6 @@ def get_inspections(bldg_num=None):
             try: row['deficiencies'] = json.loads(row['deficiencies'])
             except: row['deficiencies'] = []
     return data
-
-def delete_inspection(insp_id):
-    if not _use_supabase():
-        import db as _s; return _s.delete_inspection(insp_id)
-
-    # In Supabase, deficiencies are stored inline as JSON on the inspections row,
-    # not in a separate deficiencies table.
-    _sb().table('inspections').delete().eq('id', insp_id).execute()
 
 def update_inspection(insp_id, data, deficiencies):
     if not _use_supabase():
@@ -382,36 +315,37 @@ def get_dashboard_stats():
     if not _use_supabase():
         import db as _s; return _s.get_dashboard_stats()
     sb = _sb()
-    buildings_data = sb.table('buildings').select('id,init_devices').execute().data
+    buildings_data  = sb.table('buildings').select('id,init_devices').execute().data
     total_buildings = len(buildings_data)
-    total_devices = sum(int(b.get('init_devices') or 0) for b in buildings_data)
-
-    sched_data = sb.table('schedule').select('status,month,district,inspection_date').execute().data
-    scheduled = len(sched_data)
-    complete = sum(1 for r in sched_data if r.get('status') == 'Complete')
-    overdue = sum(1 for r in sched_data if is_schedule_overdue(r))
-    saved_reports = len(sb.table('inspections').select('id').execute().data)
-    done_pct = round(complete / scheduled * 100) if scheduled else 0
-
-    month_counts = {m: {'month': m, 'total': 0, 'complete': 0, 'done': 0} for m in MONTHS_LIST}
+    total_devices   = sum(int(b.get('init_devices') or 0) for b in buildings_data)
+    sched_data      = sb.table('schedule').select('status,month,district').execute().data
+    scheduled       = len(sched_data)
+    complete        = sum(1 for r in sched_data if r.get('status') == 'Complete')
+    overdue         = sum(1 for r in sched_data if r.get('status') == 'Overdue')
+    saved_reports   = len(sb.table('inspections').select('id').execute().data)
+    done_pct        = round(complete/scheduled*100) if scheduled else 0
+    month_counts = {}
     for r in sched_data:
-        m = r.get('month', '')
+        m = r.get('month','')
         if m not in month_counts:
-            month_counts[m] = {'month': m, 'total': 0, 'complete': 0, 'done': 0}
+            month_counts[m] = {'month': m, 'total': 0, 'complete': 0, 'overdue': 0}
         month_counts[m]['total'] += 1
         if r.get('status') == 'Complete':
             month_counts[m]['complete'] += 1
-            month_counts[m]['done'] += 1
-    by_month = [month_counts[m] for m in MONTHS_LIST] + [v for k, v in month_counts.items() if k not in MONTHS_LIST]
-
+        if r.get('status') == 'Overdue':
+            month_counts[m]['overdue'] += 1
+    by_month = list(month_counts.values())
     dist_counts = {}
     for r in sched_data:
-        d = canonicalize_district(r.get('district'))
+        d = (r.get('district') or '').strip()
         if not d:
             continue
-        dist_counts[d] = dist_counts.get(d, 0) + 1
-    by_district = [{'district': k, 'cnt': v} for k, v in sorted(dist_counts.items(), key=lambda kv: (-kv[1], kv[0]))]
-
+        if d not in dist_counts:
+            dist_counts[d] = {'district': d, 'cnt': 0, 'complete': 0}
+        dist_counts[d]['cnt'] += 1
+        if r.get('status') == 'Complete':
+            dist_counts[d]['complete'] += 1
+    by_district = list(dist_counts.values())
     return {
         'total_buildings': total_buildings,
         'scheduled': scheduled,
@@ -424,8 +358,8 @@ def get_dashboard_stats():
         'by_district': by_district,
     }
 
-def get_device_buildings():
 
+def get_device_buildings():
     """Return sorted list of distinct building names from devices table."""
     if not _use_supabase():
         import db as _s; return _s.get_device_buildings()

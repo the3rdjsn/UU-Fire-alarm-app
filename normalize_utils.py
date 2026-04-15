@@ -145,32 +145,14 @@ def clean_schedule_record(raw):
 
 
 def clean_device_record(raw):
-    if raw is None:
+    if not raw or len(raw) < 3:
         return None
-
-    if isinstance(raw, dict):
-        building = normalize_text(raw.get('building') or raw.get('Building') or raw.get('bldg') or raw.get('bldg_num'))
-        point = normalize_text(raw.get('point') or raw.get('Point'))
-        if not building or not point:
-            return None
-        return {
-            'building': building,
-            'type': normalize_text(raw.get('type') or raw.get('Type') or raw.get('device_type')),
-            'point': point,
-            'description': normalize_text(raw.get('description') or raw.get('Description')),
-        }
-
-    if isinstance(raw, (list, tuple)):
-        if len(raw) < 3:
-            return None
-        return {
-            'building': normalize_text(raw[0]),
-            'type': normalize_text(raw[1]),
-            'point': normalize_text(raw[2]),
-            'description': normalize_text(raw[3] if len(raw) > 3 else ''),
-        }
-
-    return None
+    return {
+        'building': normalize_text(raw[0]),
+        'type': normalize_text(raw[1]),
+        'point': normalize_text(raw[2]),
+        'description': normalize_text(raw[3] if len(raw) > 3 else ''),
+    }
 
 
 def clean_seed_payload(buildings, schedule, devices):

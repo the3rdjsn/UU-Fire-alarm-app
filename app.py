@@ -7,7 +7,7 @@ from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 import db_supabase as db
-from db_config import validate_db_config
+from db_config import validate_db_config, get_db_mode
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -162,7 +162,6 @@ thead tr th { background: #1a1a1a !important; color: white !important; }
 @st.cache_resource
 def init():
     mode = validate_db_config()
-    # Look for data files next to app.py, then /tmp as fallback
     app_dir = os.path.dirname(os.path.abspath(__file__))
     def load_json(name):
         local = os.path.join(app_dir, name)
@@ -177,7 +176,7 @@ def init():
     return mode
 
 active_db_mode = init()
-db.refresh_overdue_statuses()  # Recalculate overdue based on current date/month
+db.refresh_overdue_statuses()
 
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
 
@@ -239,11 +238,12 @@ with st.sidebar:
             <div style="font-size:10px;color:#CC2929;margin-top:2px">Inspections past due date</div>
         </div>""", unsafe_allow_html=True)
 
+st.caption(f"Database mode: {active_db_mode}")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 if page == "📊  Dashboard":
-    st.caption(f"Database mode: {active_db_mode}")
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
@@ -340,7 +340,7 @@ if page == "📊  Dashboard":
             st.info(f"No pending inspections in {cur_month}")
 
     with col_right:
-        st.markdown('<div class="section-title">Scheduled by District</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">By District</div>', unsafe_allow_html=True)
         dist_data = [(r['district'], r['cnt']) for r in stats['by_district']
                      if r['district'] and isinstance(r['district'], str) and len(r['district']) < 30]
         if dist_data:
@@ -1104,7 +1104,9 @@ elif page == "📁  Inspection History":
                     st.rerun()
             with hb3:
                 if st.button("🗑 Delete", key=f"del_insp_{insp['id']}", use_container_width=True):
-                    db.delete_inspection(insp['id'])
+                    with db.get_conn() as conn:
+                        conn.execute('DELETE FROM inspections WHERE id=?', (insp['id'],))
+                        conn.commit()
                     st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1197,11 +1199,9 @@ elif page == "✏️  Edit Building":
             st.rerun()
         if img_b64:
             if st.button("🗑 Remove Image", key=f'del_img_{sel_num_e}'):
-                import glob
-                img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'images')
-                for f2 in glob.glob(os.path.join(img_dir, f'{sel_num_e}.*')):
-                    os.remove(f2)
-                st.success("Image removed"); st.rerun()
+                db.delete_building_image(sel_num_e)
+                st.success("Image removed")
+                st.rerun()
 
     st.divider()
 
