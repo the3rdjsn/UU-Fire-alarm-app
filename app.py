@@ -6,7 +6,7 @@ import json, os, sys
 from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
-import db
+import db_supabase as db
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(

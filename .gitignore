@@ -1,0 +1,24 @@
+# Auto-generated
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# DB regenerates on first run
+fire_alarm.db
+
+# Building photos (too large, add manually after deploy)
+images/
+
+# Local run scripts
+run.bat
+run.sh
+
+# Redundant logo files (keep only dark/light/vert + b64 versions)
+logo_processed.png
+logo_header.png
+logo_header_b64.txt
+logo_hrz.png
+logo_hrz_b64.txt
+logo_sidebar.png
+logo_print.png
