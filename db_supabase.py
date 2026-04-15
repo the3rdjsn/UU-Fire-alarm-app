@@ -296,13 +296,32 @@ def get_dashboard_stats():
     if not _use_supabase():
         import db as _s; return _s.get_dashboard_stats()
     sb = _sb()
-    total_buildings = len(sb.table('buildings').select('id').execute().data)
-    sched_data      = sb.table('schedule').select('status').execute().data
+    buildings_data  = sb.table('buildings').select('id,init_devices,district').execute().data
+    total_buildings = len(buildings_data)
+    total_devices   = sum(int(b.get('init_devices') or 0) for b in buildings_data)
+    sched_data      = sb.table('schedule').select('status,month,district').execute().data
     scheduled       = len(sched_data)
     complete        = sum(1 for r in sched_data if r['status'] == 'Complete')
     overdue         = sum(1 for r in sched_data if r['status'] == 'Overdue')
     saved_reports   = len(sb.table('inspections').select('id').execute().data)
     done_pct        = round(complete/scheduled*100) if scheduled else 0
+    month_counts = {}
+    for r in sched_data:
+        m = r.get('month','')
+        if m not in month_counts:
+            month_counts[m] = {'month': m, 'total': 0, 'complete': 0, 'overdue': 0}
+        month_counts[m]['total'] += 1
+        if r['status'] == 'Complete':  month_counts[m]['complete'] += 1
+        if r['status'] == 'Overdue':   month_counts[m]['overdue'] += 1
+    by_month = list(month_counts.values())
+    dist_counts = {}
+    for r in sched_data:
+        d = r.get('district','')
+        if d not in dist_counts:
+            dist_counts[d] = {'district': d, 'cnt': 0, 'complete': 0}
+        dist_counts[d]['cnt'] += 1
+        if r['status'] == 'Complete': dist_counts[d]['complete'] += 1
+    by_district = list(dist_counts.values())
     return {
         'total_buildings': total_buildings,
         'scheduled': scheduled,
@@ -310,4 +329,7 @@ def get_dashboard_stats():
         'overdue': overdue,
         'saved_reports': saved_reports,
         'done_pct': done_pct,
+        'init_devices': total_devices,
+        'by_month': by_month,
+        'by_district': by_district,
     }
