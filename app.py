@@ -1164,6 +1164,9 @@ elif page == "✏️  Edit Building":
     buildings_list = db.get_buildings()
 
     # Handle prefill from Buildings page
+    if not buildings_list:
+        st.warning('No buildings loaded yet. Please wait for data to seed.')
+        st.stop()
     if 'edit_bldg_num' not in st.session_state:
         st.session_state['edit_bldg_num'] = buildings_list[0]['bldg_num']
 
