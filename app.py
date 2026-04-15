@@ -1124,27 +1124,12 @@ elif page == "🔍  Device Inventory":
         dev_types_list = ['All','SD','HD','PS','DD','WF','TS','Trans','Ext','Beam','Flood','Vesda','Hood','PRE','CO2','AES Panel','AES Zone']
         type_f = st.selectbox("Device Type", dev_types_list)
     with col3:
-        with db.get_conn() as conn:
-            bldg_names = [r[0] for r in conn.execute(
-                'SELECT DISTINCT building FROM devices ORDER BY building').fetchall()]
+        bldg_names = db.get_device_buildings()
         bldg_f = st.selectbox("Building", ['All'] + bldg_names)
 
     @st.cache_data(ttl=60)
     def load_devices(search, type_f, bldg_f):
-        with db.get_conn() as conn:
-            q = 'SELECT building, type, point, description FROM devices WHERE 1=1'
-            params = []
-            if type_f != 'All':
-                q += ' AND type=?'; params.append(type_f)
-            if bldg_f != 'All':
-                q += ' AND building=?'; params.append(bldg_f)
-            if search:
-                q += ' AND (building LIKE ? OR type LIKE ? OR point LIKE ? OR description LIKE ?)'
-                s = f'%{search}%'
-                params.extend([s, s, s, s])
-            q += ' ORDER BY building, type, point LIMIT 2000'
-            rows = conn.execute(q, params).fetchall()
-        return pd.DataFrame(rows, columns=['Building','Type','Point','Description'])
+        return db.search_devices(search, type_f, bldg_f)
 
     df = load_devices(dev_search, type_f, bldg_f)
     st.write(f"**{len(df):,}** devices shown (max 2,000 per page)")

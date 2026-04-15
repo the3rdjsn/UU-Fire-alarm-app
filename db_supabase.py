@@ -338,3 +338,35 @@ def get_dashboard_stats():
         'by_month': by_month,
         'by_district': by_district,
     }
+
+
+def get_device_buildings():
+    """Return sorted list of distinct building names from devices table."""
+    if not _use_supabase():
+        import db as _s; return _s.get_device_buildings()
+    import sqlite3
+    # Use local SQLite if available, else Supabase
+    data = _sb().table('devices').select('building').execute().data
+    names = sorted(set(r['building'] for r in data if r.get('building')))
+    return names
+
+def search_devices(search, type_f, bldg_f):
+    """Search devices with filters, return DataFrame."""
+    import pandas as pd
+    if not _use_supabase():
+        import db as _s; return _s.search_devices(search, type_f, bldg_f)
+    sb = _sb()
+    q = sb.table('devices').select('building,type,point,description')
+    if type_f and type_f != 'All':
+        q = q.eq('type', type_f)
+    if bldg_f and bldg_f != 'All':
+        q = q.eq('building', bldg_f)
+    if search:
+        # Supabase full-text: use ilike on building as primary filter
+        q = q.ilike('building', f'%{search}%')
+    q = q.order('building').order('type').order('point').limit(2000)
+    data = q.execute().data
+    # If search didn't match building, try other fields
+    if search and not data:
+        data = sb.table('devices').select('building,type,point,description')            .ilike('description', f'%{search}%').order('building').limit(2000).execute().data
+    return pd.DataFrame(data, columns=['building','type','point','description'])             .rename(columns={'building':'Building','type':'Type','point':'Point','description':'Description'})

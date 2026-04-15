@@ -377,3 +377,24 @@ def get_building_image(bldg_num):
             with open(path, 'rb') as f:
                 return base64.b64encode(f.read()).decode(), ext
     return None, None
+
+def get_device_buildings():
+    with get_conn() as conn:
+        rows = conn.execute('SELECT DISTINCT building FROM devices ORDER BY building').fetchall()
+    return [r[0] for r in rows]
+
+def search_devices(search, type_f, bldg_f):
+    import pandas as pd
+    with get_conn() as conn:
+        q = 'SELECT building, type, point, description FROM devices WHERE 1=1'
+        params = []
+        if type_f and type_f != 'All':
+            q += ' AND type=?'; params.append(type_f)
+        if bldg_f and bldg_f != 'All':
+            q += ' AND building=?'; params.append(bldg_f)
+        if search:
+            q += ' AND (building LIKE ? OR type LIKE ? OR point LIKE ? OR description LIKE ?)'
+            s = f'%{search}%'; params.extend([s, s, s, s])
+        q += ' ORDER BY building, type, point LIMIT 2000'
+        rows = conn.execute(q, params).fetchall()
+    return pd.DataFrame(rows, columns=['Building','Type','Point','Description'])
