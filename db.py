@@ -288,6 +288,12 @@ def get_inspection(insp_id):
         r = conn.execute('SELECT * FROM inspections WHERE id=?', (insp_id,)).fetchone()
         return dict(r) if r else None
 
+def delete_inspection(insp_id):
+    with get_conn() as conn:
+        conn.execute('DELETE FROM deficiencies WHERE inspection_id=?', (insp_id,))
+        conn.execute('DELETE FROM inspections WHERE id=?', (insp_id,))
+        conn.commit()
+
 def update_inspection(insp_id, data, deficiencies):
     total = sum([data.get(f'{c}_total') or 0 for c in ['ps','sd','hd','dd','wf','ts','notif','trans']])
     tested = sum([data.get(f'{c}_tested') or 0 for c in ['ps','sd','hd','dd','wf','ts','notif','trans']])

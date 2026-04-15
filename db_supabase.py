@@ -269,7 +269,7 @@ def get_inspections(bldg_num=None):
         import db as _s; return _s.get_inspections(bldg_num)
     q = _sb().table('inspections').select('*').order('inspection_date', desc=True)
     if bldg_num:
-        q = q.eq('bldg_num', str(bldg_num))
+        q = q.eq('bldg_num', normalize_bldg_num(bldg_num))
     data = q.execute().data
     # Parse deficiencies back to list
     for row in data:
@@ -277,6 +277,13 @@ def get_inspections(bldg_num=None):
             try: row['deficiencies'] = json.loads(row['deficiencies'])
             except: row['deficiencies'] = []
     return data
+
+def delete_inspection(insp_id):
+    if not _use_supabase():
+        import db as _s; return _s.delete_inspection(insp_id)
+
+    _sb().table('deficiencies').delete().eq('inspection_id', insp_id).execute()
+    _sb().table('inspections').delete().eq('id', insp_id).execute()
 
 def update_inspection(insp_id, data, deficiencies):
     if not _use_supabase():
