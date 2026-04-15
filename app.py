@@ -252,18 +252,17 @@ if page == "📊  Dashboard":
         </div>
     </div>''', unsafe_allow_html=True)
 
-    stats = db.get_dashboard_stats()
+      stats = db.get_dashboard_stats()
     done = stats.get("complete", stats.get("inspections_complete", 0))
-scheduled = stats.get("scheduled", 0)
-
-done_pct = round(done / scheduled * 100) if scheduled else 0
+    scheduled = stats.get("scheduled", 0)
+    done_pct = round(done / scheduled * 100) if scheduled else 0
 
     # Metric cards
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         st.markdown(f"""<div class="metric-card" style="--accent:#CC2929">
             <div class="label">Total Systems</div>
-            <div class="value">{stats['total_buildings']}</div>
+            <div class="value">{stats['total_systems']}</div>
             <div class="sub">Buildings monitored</div>
         </div>""", unsafe_allow_html=True)
     with c2:
@@ -288,7 +287,7 @@ done_pct = round(done / scheduled * 100) if scheduled else 0
     with c5:
         st.markdown(f"""<div class="metric-card" style="--accent:#854d0e">
             <div class="label">Reports Saved</div>
-            <div class="value" style="color:#854d0e">{stats['saved_reports']}</div>
+            <div class="value" style="color:#854d0e">{stats['reports_saved']}</div>
             <div class="sub">This cycle</div>
         </div>""", unsafe_allow_html=True)
 
