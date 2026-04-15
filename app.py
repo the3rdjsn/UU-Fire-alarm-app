@@ -244,15 +244,7 @@ with st.sidebar:
                     key='nav_radio',
                     label_visibility="collapsed")
 
-    st.divider()
-    stats = db.get_dashboard_stats()
-    overdue_count = stats['overdue']
-    if overdue_count > 0:
-        st.markdown(f"""
-        <div style="background:#fee2e2;border-radius:8px;padding:10px 14px;border-left:3px solid #CC2929">
-            <div style="font-size:11px;font-weight:700;color:#991b1b">⚠️ {overdue_count} OVERDUE</div>
-            <div style="font-size:10px;color:#CC2929;margin-top:2px">Inspections past due date</div>
-        </div>""", unsafe_allow_html=True)
+
 
 st.caption(f"Database mode: {active_db_mode}")
 
