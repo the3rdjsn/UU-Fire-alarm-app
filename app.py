@@ -188,8 +188,8 @@ def _load_logo_b64(fname):
 # logo_hrz_b64.txt  = horizontal logo on dark-red bg  → page headers
 # logo_vert_b64.txt = vertical logo on white bg        → print report
 # logo_b64.txt      = horizontal logo on dark bg       → sidebar
-LOGO_B64        = _load_logo_b64("logo_hrz_b64.txt")   # page headers (red bg)
-LOGO_B64_PRINT  = _load_logo_b64("logo_vert_b64.txt")  # print report (white bg)
+LOGO_B64        = _load_logo_b64("logo_dark_b64.txt")   # page headers (red bg) - white text
+LOGO_B64_PRINT  = _load_logo_b64("logo_light_b64.txt")  # print report (white bg) - dark text
 LOGO_HEADER_B64 = LOGO_B64                             # alias for header refs
 
 MONTHS = ['All','January','February','March','April','May','June',
@@ -294,7 +294,7 @@ if page == "📊  Dashboard":
         month_order = {m: i for i, m in enumerate(MONTHS_NO_ALL)}
         month_data = {r['month']: r for r in stats['by_month']}
         months_plot = MONTHS_NO_ALL
-        done_vals  = [month_data.get(m, {}).get('done', 0) for m in months_plot]
+        done_vals  = [month_data.get(m, {}).get('done', month_data.get(m, {}).get('complete', 0)) for m in months_plot]
         total_vals = [month_data.get(m, {}).get('total', 0) for m in months_plot]
         remain_vals = [t - d for t, d in zip(total_vals, done_vals)]
         cur_month = datetime.now().strftime('%B')
