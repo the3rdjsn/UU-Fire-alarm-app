@@ -16,7 +16,7 @@ def using_supabase():
 def validate_db_config():
     mode = get_db_mode()
     if mode == "supabase":
-        missing = [k for k in ("SUPABASE_URL", "SUPABASE_KEY") if not os.environ.get(k)]
+        missing = [key for key in ("SUPABASE_URL", "SUPABASE_KEY") if not os.environ.get(key)]
         if missing:
             raise RuntimeError(
                 "DB_MODE is 'supabase' but these env vars are missing: " + ", ".join(missing)

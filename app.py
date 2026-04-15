@@ -1,4 +1,3 @@
-import logging
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -7,9 +6,7 @@ import json, os, sys
 from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 import db_supabase as db
-from db_config import validate_db_config
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -163,7 +160,6 @@ thead tr th { background: #1a1a1a !important; color: white !important; }
 # ── INIT DB ──────────────────────────────────────────────────────────────────
 @st.cache_resource
 def init():
-    mode = validate_db_config()
     # Look for data files next to app.py, then /tmp as fallback
     app_dir = os.path.dirname(os.path.abspath(__file__))
     def load_json(name):
@@ -175,10 +171,9 @@ def init():
     schedule   = load_json('schedule_clean.json')
     devices    = load_json('device_rows.json')
     db.init_db(buildings, schedule, devices)
-    return mode
+    return True
 
-active_db_mode = init()
-st.caption(f"Database mode: **{active_db_mode}**")
+init()
 db.refresh_overdue_statuses()  # Recalculate overdue based on current month
 
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
@@ -1105,7 +1100,9 @@ elif page == "📁  Inspection History":
                     st.rerun()
             with hb3:
                 if st.button("🗑 Delete", key=f"del_insp_{insp['id']}", use_container_width=True):
-                    db.delete_inspection(insp['id'])
+                    with db.get_conn() as conn:
+                        conn.execute('DELETE FROM inspections WHERE id=?', (insp['id'],))
+                        conn.commit()
                     st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════

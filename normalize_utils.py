@@ -149,33 +149,25 @@ def clean_device_record(raw):
         return None
 
     if isinstance(raw, dict):
-        building = normalize_text(raw.get('building') or raw.get('Building') or raw.get('bldg_num') or raw.get('bldg'))
-        device_type = normalize_text(raw.get('type') or raw.get('Type') or raw.get('device_type'))
+        building = normalize_text(raw.get('building') or raw.get('Building') or raw.get('bldg') or raw.get('bldg_num'))
         point = normalize_text(raw.get('point') or raw.get('Point'))
-        description = normalize_text(raw.get('description') or raw.get('Description'))
-        if not building:
+        if not building or not point:
             return None
         return {
             'building': building,
-            'type': device_type,
+            'type': normalize_text(raw.get('type') or raw.get('Type') or raw.get('device_type')),
             'point': point,
-            'description': description,
+            'description': normalize_text(raw.get('description') or raw.get('Description')),
         }
 
     if isinstance(raw, (list, tuple)):
-        if len(raw) < 1:
-            return None
-        building = normalize_text(raw[0]) if len(raw) > 0 else ''
-        device_type = normalize_text(raw[1]) if len(raw) > 1 else ''
-        point = normalize_text(raw[2]) if len(raw) > 2 else ''
-        description = normalize_text(raw[3]) if len(raw) > 3 else ''
-        if not building:
+        if len(raw) < 3:
             return None
         return {
-            'building': building,
-            'type': device_type,
-            'point': point,
-            'description': description,
+            'building': normalize_text(raw[0]),
+            'type': normalize_text(raw[1]),
+            'point': normalize_text(raw[2]),
+            'description': normalize_text(raw[3] if len(raw) > 3 else ''),
         }
 
     return None

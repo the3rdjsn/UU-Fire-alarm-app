@@ -1,12 +1,8 @@
-import logging
-import sqlite3, json, os
+import sqlite3, json, os, logging
 from datetime import date, datetime
 
-from normalize_utils import clean_seed_payload, normalize_bldg_num
-
-logger = logging.getLogger(__name__)
-
 DB_PATH = os.path.join(os.path.dirname(__file__), 'fire_alarm.db')
+logger = logging.getLogger(__name__)
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -14,7 +10,6 @@ def get_conn():
     return conn
 
 def init_db(buildings, schedule, devices):
-    buildings, schedule, devices = clean_seed_payload(buildings, schedule, devices)
     conn = get_conn()
     c = conn.cursor()
 
@@ -81,52 +76,71 @@ def init_db(buildings, schedule, devices):
             try:
                 c.execute('''INSERT OR IGNORE INTO buildings VALUES
                     (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                    (b['bldg_num'],
-                     b['name'], b['report_name'],
-                     b['district'], b['address'],
-                     b['city'], b['state'], b['zip'],
-                     b['built'], b['sq_ft'],
-                     b['aux'], b['panel_type'],
-                     b['year_installed'], b['age'],
-                     b['gateway'], b['inspection_month'],
-                     b['scheduled_date'],
-                     b['replacement_priority'],
-                     b['replacement_cost'],
-                     b['replacement_scheduled'],
-                     b['gateway_ip'], b['anx_ip'],
-                     b['subnet'], b['vlan'],
-                     b['nodes'], b['transponders'],
-                     b['smoke'], b['heat'],
-                     b['pull'], b['duct'],
-                     b['init_devices'],
-                     b['notif_devices'],
-                     b['panel_location'], b['focalpoint_name'],
-                     b['time_to_test'], b['aim_asset']))
-            except Exception:
-                logger.exception('Failed to seed building %s', b.get('bldg_num'))
+                    (str(b.get('Bldg #','')).split('.')[0],
+                     b.get('Building Name',''), b.get('Report Name',''),
+                     b.get('District',''), b.get('Street Address',''),
+                     b.get('City',''), b.get('State',''), str(b.get('Zip','')),
+                     b.get('Built'), b.get('Gross Sq Ft'),
+                     b.get('Aux (Yes/No)',''), b.get('Panel Type',''),
+                     b.get('Year Installed'), b.get('Age Of System'),
+                     b.get('Gateway  (Yes/No)',''), b.get('Inspection Month',''),
+                     b.get('Inspection Date'), 
+                     b.get('Critical Replacement (1-5, 5 Being Most Critical)'),
+                     b.get('Replacement Cost'),
+                     b.get('Replacement Scheduled (Yes/No/Na)',''),
+                     b.get('Gateway Ip Addresses',''), b.get('Anx Ip Addresses',''),
+                     b.get('Subnet',''), str(b.get('Vlan','')),
+                     b.get('Nodes'), b.get('Transponders'),
+                     b.get('Smoke Detectors'), b.get('Heat Detectors'),
+                     b.get('Pull Stations'), b.get('Duct Dectors'),
+                     b.get('Intitiation Devices'),
+                     b.get('Notification Devices'),
+                     b.get('Panel Location',''), b.get('FocalPoint Name',''),
+                     b.get('Time To Test'), b.get('Aim Asset Number','')))
+            except Exception as e:
+                logger.exception("Failed to seed building row: %s", b)
 
     # Seed schedule if empty
     if c.execute('SELECT COUNT(*) FROM schedule').fetchone()[0] == 0:
         for s in schedule:
-            try:
-                c.execute('''INSERT INTO schedule 
-                    (month, bldg_num, building_name, district, address,
-                     est_hours, inspection_date, status, date_completed,
-                     uploaded_cms, notes)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-                    (s['month'], s['bldg_num'], s['building_name'], s['district'],
-                     s['address'], s['est_hours'], s['inspection_date'], s['status'],
-                     s['date_completed'], s['uploaded_cms'], s['notes']))
-            except Exception:
-                logger.exception('Failed to seed schedule row for building %s', s.get('bldg_num'))
+            completed = str(s.get('completed',''))
+            insp_date = s.get('inspection_date','')
+            if insp_date in ('None','nan',''): insp_date = None
+            if insp_date and len(str(insp_date)) > 10: insp_date = str(insp_date)[:10]
+            
+            MONTHS_LIST = ['January','February','March','April','May','June',
+                           'July','August','September','October','November','December']
+            s_month = s.get('month','')
+            month_num = MONTHS_LIST.index(s_month) + 1 if s_month in MONTHS_LIST else 99
+            cur_month = date.today().month
+
+            if completed in ('3','3.0'):
+                status = 'Complete'
+            elif insp_date == 'CONSTRUCTION':
+                status = 'Construction'
+                insp_date = None
+            elif month_num < cur_month:
+                # Inspection month fully passed this cycle without completion
+                status = 'Overdue'
+            else:
+                status = 'Pending'
+
+            c.execute('''INSERT INTO schedule 
+                (month, bldg_num, building_name, district, address,
+                 est_hours, inspection_date, status, date_completed,
+                 uploaded_cms, notes)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                (s.get('month',''),
+                 normalize_bldg_num(s.get('bldg_num')),
+                 s.get('building_name',''), s.get('district',''),
+                 s.get('address',''), s.get('est_hours'),
+                 insp_date, status, None,
+                 'Yes' if s.get('uploaded_cms')==1 else 'No', ''))
 
     # Seed devices if empty
     if c.execute('SELECT COUNT(*) FROM devices').fetchone()[0] == 0:
-        try:
-            c.executemany('INSERT INTO devices (building,type,point,description) VALUES (?,?,?,?)',
-                          [(d['building'], d['type'], d['point'], d['description']) for d in devices])
-        except Exception:
-            logger.exception('Failed to seed devices')
+        c.executemany('INSERT INTO devices (building,type,point,description) VALUES (?,?,?,?)',
+                      [(d['building'], d['type'], d['point'], d['description']) for d in devices])
 
     conn.commit()
     conn.close()
@@ -137,7 +151,7 @@ def get_buildings():
 
 def get_building(bldg_num):
     with get_conn() as conn:
-        r = conn.execute('SELECT * FROM buildings WHERE bldg_num=?', (normalize_bldg_num(bldg_num),)).fetchone()
+        r = conn.execute('SELECT * FROM buildings WHERE bldg_num=?', (str(bldg_num),)).fetchone()
         return dict(r) if r else None
 
 def get_schedule(month=None):
@@ -182,7 +196,7 @@ def save_inspection(data, deficiencies):
              aes_alarm, aes_supv, aes_trouble, aes_wf, aes_tamper, aes_duct, aes_ext,
              deficiencies, notes, inspector_name, pct_tested, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (normalize_bldg_num(data['bldg_num']), data['building_name'], data['district'],
+            (data['bldg_num'], data['building_name'], data['district'],
              data['inspection_date'], data['work_order'], data['inspection_type'],
              data['result'],
              data.get('ps_total'), data.get('ps_tested'),
@@ -204,23 +218,17 @@ def save_inspection(data, deficiencies):
         # Update schedule status
         conn.execute('''UPDATE schedule SET status="Complete", date_completed=?
                         WHERE bldg_num=?''',
-                     (data['inspection_date'], normalize_bldg_num(data['bldg_num'])))
+                     (data['inspection_date'], data['bldg_num']))
         conn.commit()
         return insp_id
 
 def get_inspections(bldg_num=None):
     with get_conn() as conn:
         if bldg_num:
-            rows = conn.execute('SELECT * FROM inspections WHERE bldg_num=? ORDER BY inspection_date DESC', (normalize_bldg_num(bldg_num),)).fetchall()
+            rows = conn.execute('SELECT * FROM inspections WHERE bldg_num=? ORDER BY inspection_date DESC', (str(bldg_num),)).fetchall()
         else:
             rows = conn.execute('SELECT * FROM inspections ORDER BY created_at DESC').fetchall()
         return [dict(r) for r in rows]
-
-
-def delete_inspection(insp_id):
-    with get_conn() as conn:
-        conn.execute('DELETE FROM inspections WHERE id=?', (insp_id,))
-        conn.commit()
 
 def get_dashboard_stats():
     with get_conn() as conn:
@@ -347,7 +355,7 @@ def update_building(bldg_num, fields):
     vals = [v for k,v in fields.items() if k in allowed]
     if not sets: return
     with get_conn() as conn:
-        conn.execute(f'UPDATE buildings SET {sets} WHERE bldg_num=?', vals + [normalize_bldg_num(bldg_num)])
+        conn.execute(f'UPDATE buildings SET {sets} WHERE bldg_num=?', vals + [str(bldg_num)])
         conn.commit()
 
 def save_building_image(bldg_num, image_bytes, ext='jpg'):

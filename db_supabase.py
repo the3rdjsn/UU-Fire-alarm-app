@@ -1,24 +1,18 @@
 """
 db_supabase.py — Supabase (PostgreSQL) backend.
-Uses explicit DB_MODE configuration and falls back to SQLite only when DB_MODE=sqlite.
+Drop-in replacement for db.py when SUPABASE_URL + SUPABASE_KEY are set.
+Falls back to SQLite automatically if env vars are missing (local dev).
 """
-import logging
 import os, json
 import streamlit as st
 from datetime import date
 
-from normalize_utils import clean_seed_payload, normalize_bldg_num
-from db_config import using_supabase, validate_db_config
-
-logger = logging.getLogger(__name__)
-
 # ── Connection ────────────────────────────────────────────────────────────────
 def _use_supabase():
-    return using_supabase()
+    return bool(os.environ.get('SUPABASE_URL') and os.environ.get('SUPABASE_KEY'))
 
 @st.cache_resource
 def _get_supabase():
-    validate_db_config()
     from supabase import create_client
     url = os.environ['SUPABASE_URL']
     key = os.environ['SUPABASE_KEY']
@@ -32,7 +26,6 @@ MONTHS_LIST = ['January','February','March','April','May','June',
                'July','August','September','October','November','December']
 
 def init_db(buildings, schedule, devices):
-    buildings, schedule, devices = clean_seed_payload(buildings, schedule, devices)
     if _use_supabase():
         _seed_supabase(buildings, schedule, devices)
     else:
@@ -45,32 +38,102 @@ def _seed_supabase(buildings, schedule, devices):
     # ── Buildings ──────────────────────────────────────────────────────────────
     existing = sb.table('buildings').select('bldg_num').execute()
     if not existing.data:
-        rows = list(buildings)
+        def _safe_int(v):
+            try: n = int(float(str(v))); return n if n else None
+            except: return None
+        def _safe_float(v):
+            try: n = float(str(v)); return n if n else None
+            except: return None
+        rows = []
+        for b in buildings:
+            # Support both raw JSON keys and pre-mapped keys
+            bldg_num = str(b.get('Bldg #') or b.get('bldg_num') or '').split('.')[0].strip()
+            if not bldg_num or bldg_num == 'None': continue
+            rows.append({
+                'bldg_num':             bldg_num,
+                'name':                 b.get('Building Name') or b.get('building_name') or b.get('name',''),
+                'report_name':          b.get('Report Name') or b.get('report_name',''),
+                'district':             b.get('District') or b.get('district',''),
+                'address':              b.get('Street Address') or b.get('address',''),
+                'city':                 b.get('City') or b.get('city',''),
+                'state':                b.get('State') or b.get('state',''),
+                'zip':                  str(b.get('Zip') or b.get('zip','') or ''),
+                'built':                _safe_int(b.get('Built') or b.get('built')),
+                'sq_ft':                _safe_int(b.get('Gross Sq Ft') or b.get('sq_ft')),
+                'aux':                  b.get('Aux (Yes/No)') or b.get('aux',''),
+                'panel_type':           b.get('Panel Type') or b.get('panel_type',''),
+                'year_installed':       _safe_int(b.get('Year Installed') or b.get('year_installed')),
+                'age':                  _safe_int(b.get('Age Of System') or b.get('age')),
+                'gateway':              b.get('Gateway  (Yes/No)') or b.get('gateway',''),
+                'inspection_month':     b.get('Inspection Month') or b.get('inspection_month',''),
+                'replacement_priority': _safe_int(b.get('Critical Replacement (1-5, 5 Being Most Critical)') or b.get('replacement_priority')),
+                'gateway_ip':           b.get('Gateway Ip Addresses') or b.get('gateway_ip',''),
+                'anx_ip':               b.get('Anx Ip Addresses') or b.get('anx_ip',''),
+                'subnet':               b.get('Subnet') or b.get('subnet',''),
+                'vlan':                 str(b.get('Vlan') or b.get('vlan','') or ''),
+                'nodes':                _safe_int(b.get('Nodes') or b.get('nodes')),
+                'transponders':         _safe_int(b.get('Transponders') or b.get('transponders')),
+                'smoke':                _safe_int(b.get('Smoke Detectors') or b.get('smoke')),
+                'heat':                 _safe_int(b.get('Heat Detectors') or b.get('heat')),
+                'pull':                 _safe_int(b.get('Pull Stations') or b.get('pull')),
+                'duct':                 _safe_int(b.get('Duct Dectors') or b.get('duct')),
+                'init_devices':         _safe_int(b.get('Intitiation Devices') or b.get('init_devices')),
+                'notif_devices':        _safe_float(b.get('Notification Devices') or b.get('notif_devices')),
+                'panel_location':       b.get('Panel Location') or b.get('panel_location',''),
+                'focalpoint_name':      b.get('FocalPoint Name') or b.get('focalpoint_name',''),
+                'time_to_test':         _safe_int(b.get('Time To Test') or b.get('time_to_test')),
+                'aim_asset':            b.get('aim_asset',''),
+            })
         for i in range(0, len(rows), 100):
-            try:
-                sb.table('buildings').insert(rows[i:i+100]).execute()
-            except Exception:
-                logger.exception('Failed to seed Supabase buildings batch starting at %s', i)
+            sb.table('buildings').insert(rows[i:i+100]).execute()
 
     # ── Schedule ───────────────────────────────────────────────────────────────
     existing = sb.table('schedule').select('id').limit(1).execute()
     if not existing.data:
-        rows = list(schedule)
+        cur_month = date.today().month
+        rows = []
+        for s in schedule:
+            completed = str(s.get('completed',''))
+            insp_date = s.get('inspection_date','')
+            if insp_date in ('None','nan',''): insp_date = None
+            if insp_date and len(str(insp_date)) > 10: insp_date = str(insp_date)[:10]
+            s_month = s.get('month','')
+            month_num = MONTHS_LIST.index(s_month)+1 if s_month in MONTHS_LIST else 99
+            if insp_date == 'CONSTRUCTION':
+                status = 'Construction'; insp_date = None
+            elif completed in ('3','3.0'):
+                status = 'Complete'
+            elif month_num < cur_month:
+                status = 'Overdue'
+            else:
+                status = 'Pending'
+            rows.append({
+                'month':         s_month,
+                'bldg_num':      normalize_bldg_num(s.get('bldg_num')),
+                'building_name': s.get('building_name',''),
+                'district':      s.get('district',''),
+                'address':       s.get('address',''),
+                'est_hours':     s.get('est_hours'),
+                'inspection_date': insp_date,
+                'status':        status,
+                'date_completed': None,
+                'uploaded_cms':  s.get('uploaded_cms','No') or 'No',
+                'notes':         '',
+            })
         for i in range(0, len(rows), 100):
-            try:
-                sb.table('schedule').insert(rows[i:i+100]).execute()
-            except Exception:
-                logger.exception('Failed to seed Supabase schedule batch starting at %s', i)
+            sb.table('schedule').insert(rows[i:i+100]).execute()
 
     # ── Devices ────────────────────────────────────────────────────────────────
     existing = sb.table('devices').select('id').limit(1).execute()
     if not existing.data:
-        rows = list(devices)
+        rows = [{
+            'building': d['building'],
+            'type': d['type'],
+            'point': d['point'],
+            'description': d['description'],
+        } for d in devices]
         for i in range(0, len(rows), 500):
-            try:
-                sb.table('devices').insert(rows[i:i+500]).execute()
-            except Exception:
-                logger.exception('Failed to seed Supabase devices batch starting at %s', i)
+            sb.table('devices').insert(rows[i:i+500]).execute()
 
 # ── Overdue refresh ───────────────────────────────────────────────────────────
 def refresh_overdue_statuses():
@@ -103,7 +166,7 @@ def get_buildings():
 def get_building(bldg_num):
     if not _use_supabase():
         import db as _s; return _s.get_building(bldg_num)
-    r = _sb().table('buildings').select('*').eq('bldg_num', normalize_bldg_num(bldg_num)).execute().data
+    r = _sb().table('buildings').select('*').eq('bldg_num', str(bldg_num)).execute().data
     return r[0] if r else None
 
 def update_building(bldg_num, fields):
@@ -117,7 +180,7 @@ def update_building(bldg_num, fields):
                'time_to_test','aim_asset']
     clean = {k: v for k, v in fields.items() if k in allowed}
     if clean:
-        _sb().table('buildings').update(clean).eq('bldg_num', normalize_bldg_num(bldg_num)).execute()
+        _sb().table('buildings').update(clean).eq('bldg_num', str(bldg_num)).execute()
 
 def save_building_image(bldg_num, image_bytes, ext='jpg'):
     if not _use_supabase():
@@ -125,16 +188,16 @@ def save_building_image(bldg_num, image_bytes, ext='jpg'):
     import base64
     b64 = base64.b64encode(image_bytes).decode()
     sb = _sb()
-    existing = sb.table('building_images').select('bldg_num').eq('bldg_num', normalize_bldg_num(bldg_num)).execute()
+    existing = sb.table('building_images').select('bldg_num').eq('bldg_num', str(bldg_num)).execute()
     if existing.data:
-        sb.table('building_images').update({'image_data':b64,'image_ext':ext}).eq('bldg_num', normalize_bldg_num(bldg_num)).execute()
+        sb.table('building_images').update({'image_data':b64,'image_ext':ext}).eq('bldg_num', str(bldg_num)).execute()
     else:
-        sb.table('building_images').insert({'bldg_num':normalize_bldg_num(bldg_num),'image_data':b64,'image_ext':ext}).execute()
+        sb.table('building_images').insert({'bldg_num':str(bldg_num),'image_data':b64,'image_ext':ext}).execute()
 
 def get_building_image(bldg_num):
     if not _use_supabase():
         import db as _s; return _s.get_building_image(bldg_num)
-    r = _sb().table('building_images').select('image_data,image_ext').eq('bldg_num', normalize_bldg_num(bldg_num)).execute().data
+    r = _sb().table('building_images').select('image_data,image_ext').eq('bldg_num', str(bldg_num)).execute().data
     if r:
         return r[0]['image_data'], r[0]['image_ext']
     return None, None
@@ -165,7 +228,7 @@ def save_inspection(data, deficiencies):
     tested = sum([data.get(f'{c}_tested') or 0 for c in ['ps','sd','hd','dd','wf','ts','notif','trans']])
     pct = round(tested/total*100) if total > 0 else 0
     row = {
-        'bldg_num': normalize_bldg_num(data['bldg_num']), 'building_name': data['building_name'],
+        'bldg_num': data['bldg_num'], 'building_name': data['building_name'],
         'district': data.get('district',''), 'inspection_date': data['inspection_date'],
         'work_order': data.get('work_order',''), 'inspection_type': data.get('inspection_type',''),
         'result': data.get('result',''), 'notes': data.get('notes',''),
@@ -206,7 +269,7 @@ def get_inspections(bldg_num=None):
         import db as _s; return _s.get_inspections(bldg_num)
     q = _sb().table('inspections').select('*').order('inspection_date', desc=True)
     if bldg_num:
-        q = q.eq('bldg_num', normalize_bldg_num(bldg_num))
+        q = q.eq('bldg_num', str(bldg_num))
     data = q.execute().data
     # Parse deficiencies back to list
     for row in data:
@@ -214,11 +277,6 @@ def get_inspections(bldg_num=None):
             try: row['deficiencies'] = json.loads(row['deficiencies'])
             except: row['deficiencies'] = []
     return data
-
-def delete_inspection(insp_id):
-    if not _use_supabase():
-        import db as _s; return _s.delete_inspection(insp_id)
-    _sb().table('inspections').delete().eq('id', insp_id).execute()
 
 def update_inspection(insp_id, data, deficiencies):
     if not _use_supabase():
