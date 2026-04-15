@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 import db_supabase as db
+from db_config import validate_db_config
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -160,21 +161,23 @@ thead tr th { background: #1a1a1a !important; color: white !important; }
 # ── INIT DB ──────────────────────────────────────────────────────────────────
 @st.cache_resource
 def init():
+    mode = validate_db_config()
     # Look for data files next to app.py, then /tmp as fallback
     app_dir = os.path.dirname(os.path.abspath(__file__))
     def load_json(name):
         local = os.path.join(app_dir, name)
         fallback = os.path.join('/tmp', name)
         path = local if os.path.exists(local) else fallback
-        with open(path) as f: return json.load(f)
+        with open(path) as f:
+            return json.load(f)
     buildings = load_json('buildings_clean.json')
-    schedule   = load_json('schedule_clean.json')
-    devices    = load_json('device_rows.json')
+    schedule = load_json('schedule_clean.json')
+    devices = load_json('device_rows.json')
     db.init_db(buildings, schedule, devices)
-    return True
+    return mode
 
-init()
-db.refresh_overdue_statuses()  # Recalculate overdue based on current month
+active_db_mode = init()
+db.refresh_overdue_statuses()  # Recalculate overdue based on current date/month
 
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
 
@@ -240,6 +243,7 @@ with st.sidebar:
 # DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 if page == "📊  Dashboard":
+    st.caption(f"Database mode: {active_db_mode}")
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
@@ -336,7 +340,7 @@ if page == "📊  Dashboard":
             st.info(f"No pending inspections in {cur_month}")
 
     with col_right:
-        st.markdown('<div class="section-title">By District</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Scheduled by District</div>', unsafe_allow_html=True)
         dist_data = [(r['district'], r['cnt']) for r in stats['by_district']
                      if r['district'] and isinstance(r['district'], str) and len(r['district']) < 30]
         if dist_data:

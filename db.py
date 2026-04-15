@@ -2,6 +2,61 @@ import sqlite3, json, os, logging
 from datetime import date, datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'fire_alarm.db')
+
+MONTHS_LIST = ['January','February','March','April','May','June',
+               'July','August','September','October','November','December']
+
+def canonicalize_district(value):
+    if value is None:
+        return ''
+    text = str(value).strip()
+    if not text or text.lower() in ('nan', 'none'):
+        return ''
+    cleaned = ' '.join(text.replace('_', ' ').split()).upper()
+    aliases = {
+        'ENGINERING': 'ENGINEERING',
+        'ENGINEERING': 'ENGINEERING',
+        'HEALTH SCIENCE': 'HEALTH SCIENCE',
+        'ACADEMIC': 'ACADEMIC',
+        'VENUES': 'VENUES',
+        'PRESIDENTS': 'PRESIDENTS',
+        'SCIENCE': 'SCIENCE',
+        'CORE': 'CORE',
+        'HRE': 'HRE',
+        'USA': 'USA',
+        'GUEST': 'GUEST',
+        'PARKING': 'PARKING',
+    }
+    return aliases.get(cleaned, cleaned)
+
+def parse_schedule_date(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in ('nan', 'none'):
+        return None
+    if text.upper().startswith('NEW CONSTR'):
+        return None
+    try:
+        return datetime.fromisoformat(text[:10]).date()
+    except Exception:
+        return None
+
+def is_schedule_overdue(row, today=None):
+    today = today or date.today()
+    status = str(row.get('status') or '').strip()
+    if status in ('Complete', 'Construction'):
+        return False
+
+    sched_date = parse_schedule_date(row.get('inspection_date'))
+    if sched_date is not None:
+        return sched_date < today
+
+    month = str(row.get('month') or '').strip()
+    if month in MONTHS_LIST:
+        return MONTHS_LIST.index(month) + 1 < today.month
+    return False
+
 logger = logging.getLogger(__name__)
 
 def get_conn():
@@ -232,58 +287,64 @@ def get_inspections(bldg_num=None):
 
 def get_dashboard_stats():
     with get_conn() as conn:
-        total   = conn.execute('SELECT COUNT(*) FROM buildings').fetchone()[0]
-        sched   = conn.execute('SELECT COUNT(*) FROM schedule').fetchone()[0]
-        done    = conn.execute('SELECT COUNT(*) FROM schedule WHERE status="Complete"').fetchone()[0]
-        # Overdue = month has passed this cycle and not complete
-        import datetime as _dt
-        _months = ['January','February','March','April','May','June',
-                   'July','August','September','October','November','December']
-        _cur = _dt.date.today().month
-        _past = [m for m in _months if _months.index(m)+1 < _cur]
-        _placeholders = ','.join('?' for _ in _past) if _past else "''"
-        overdue = conn.execute(
-            f'SELECT COUNT(*) FROM schedule WHERE status!="Complete" AND status!="Construction" AND month IN ({_placeholders})',
-            _past).fetchone()[0] if _past else 0
-        saved   = conn.execute('SELECT COUNT(*) FROM inspections').fetchone()[0]
-        init_dev= conn.execute('SELECT SUM(init_devices) FROM buildings').fetchone()[0] or 0
-        by_month= conn.execute('''SELECT month, 
-                    SUM(CASE WHEN status="Complete" THEN 1 ELSE 0 END) as done,
-                    COUNT(*) as total
-                    FROM schedule GROUP BY month''').fetchall()
-        by_dist = conn.execute('''SELECT district, COUNT(*) as cnt FROM buildings
-                    WHERE district IS NOT NULL AND district != ""
-                    GROUP BY district ORDER BY cnt DESC''').fetchall()
+        total = conn.execute('SELECT COUNT(*) FROM buildings').fetchone()[0]
+        init_dev = conn.execute('SELECT SUM(init_devices) FROM buildings').fetchone()[0] or 0
+        saved = conn.execute('SELECT COUNT(*) FROM inspections').fetchone()[0]
+
+        schedule_rows = [dict(r) for r in conn.execute(
+            'SELECT month, district, status, inspection_date FROM schedule'
+        ).fetchall()]
+        scheduled = len(schedule_rows)
+        complete = sum(1 for r in schedule_rows if r.get('status') == 'Complete')
+        overdue = sum(1 for r in schedule_rows if is_schedule_overdue(r))
+
+        month_counts = {m: {'month': m, 'done': 0, 'total': 0} for m in MONTHS_LIST}
+        for r in schedule_rows:
+            month = r.get('month')
+            if month not in month_counts:
+                month_counts[month] = {'month': month, 'done': 0, 'total': 0}
+            month_counts[month]['total'] += 1
+            if r.get('status') == 'Complete':
+                month_counts[month]['done'] += 1
+
+        dist_counts = {}
+        for r in schedule_rows:
+            district = canonicalize_district(r.get('district'))
+            if not district:
+                continue
+            dist_counts[district] = dist_counts.get(district, 0) + 1
+
+        by_dist = [{'district': k, 'cnt': v} for k, v in sorted(dist_counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
         return {
-            'total_buildings': total, 'scheduled': sched,
-            'complete': done, 'overdue': overdue, 'saved_reports': saved,
+            'total_buildings': total,
+            'scheduled': scheduled,
+            'complete': complete,
+            'overdue': overdue,
+            'saved_reports': saved,
             'init_devices': int(init_dev),
-            'by_month': [dict(r) for r in by_month],
-            'by_district': [dict(r) for r in by_dist],
+            'by_month': [month_counts[m] for m in MONTHS_LIST] + [v for k, v in month_counts.items() if k not in MONTHS_LIST],
+            'by_district': by_dist,
         }
 
 def refresh_overdue_statuses():
-    """Recalculate overdue status for all non-complete schedule entries on every app load."""
-    MONTHS_LIST = ['January','February','March','April','May','June',
-                   'July','August','September','October','November','December']
-    cur_month = date.today().month
-    past_months = [m for m in MONTHS_LIST if MONTHS_LIST.index(m) + 1 < cur_month]
+    """Recalculate overdue status using inspection_date when available, with month fallback."""
+    today = date.today()
     with get_conn() as conn:
-        if past_months:
-            placeholders = ','.join('?' for _ in past_months)
-            conn.execute(
-                f"UPDATE schedule SET status='Overdue' WHERE status NOT IN ('Complete','Construction') AND month IN ({placeholders})",
-                past_months)
-        # Anything in current or future month that is not Complete → Pending (not Overdue)
-        future_months = [m for m in MONTHS_LIST if MONTHS_LIST.index(m) + 1 >= cur_month]
-        if future_months:
-            placeholders2 = ','.join('?' for _ in future_months)
-            conn.execute(
-                f"UPDATE schedule SET status='Pending' WHERE status='Overdue' AND month IN ({placeholders2})",
-                future_months)
+        rows = [dict(r) for r in conn.execute(
+            'SELECT id, month, status, inspection_date FROM schedule'
+        ).fetchall()]
+        for row in rows:
+            status = str(row.get('status') or '').strip()
+            if status in ('Complete', 'Construction'):
+                continue
+            new_status = 'Overdue' if is_schedule_overdue(row, today=today) else 'Pending'
+            if status != new_status:
+                conn.execute('UPDATE schedule SET status=? WHERE id=?', (new_status, row['id']))
         conn.commit()
 
 def get_inspection(insp_id):
+
     with get_conn() as conn:
         r = conn.execute('SELECT * FROM inspections WHERE id=?', (insp_id,)).fetchone()
         return dict(r) if r else None
