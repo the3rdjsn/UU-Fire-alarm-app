@@ -40,8 +40,11 @@ def _seed_supabase(buildings, schedule, devices):
     if not existing.data:
         rows = []
         for b in buildings:
+            bldg_num = str(b.get('bldg_num','')).split('.')[0].strip()
+            if not bldg_num:
+                continue
             rows.append({
-                'bldg_num':             str(b.get('bldg_num','')).split('.')[0],
+                'bldg_num':             bldg_num,
                 'name':                 b.get('building_name') or b.get('name',''),
                 'report_name':          b.get('report_name',''),
                 'district':             b.get('district',''),
