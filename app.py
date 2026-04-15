@@ -587,13 +587,10 @@ elif page == "🏢  Buildings":
     if panel_f != 'All':
         filtered = [b for b in filtered if b.get('panel_type') == panel_f]
 
-    st.write(f"**{len(filtered)}** buildings")
-
     def _i(v):
         try: return int(float(v)) if v not in (None, '') else ''
         except: return v
 
-    # Show as dataframe
     df = pd.DataFrame([{
         '#': b['bldg_num'],
         'Building': b['name'],
@@ -626,88 +623,115 @@ elif page == "🏢  Buildings":
             styled = df.style
     except Exception:
         styled = df.style
-    # Clickable table — selecting a row jumps to that building's detail
+
     bldg_labels = [f"{b['bldg_num']} — {b['name']}" for b in filtered]
 
-    selected = st.dataframe(
-        styled, use_container_width=True, hide_index=True, height=500,
-        on_select="rerun", selection_mode="single-row", key="bldg_table"
-    )
+    # ── Two-column layout: table left, detail right ────────────────────────
+    tbl_col, det_col = st.columns([3, 2])
 
-    # Resolve selected building: row click takes priority over selectbox
-    sel_rows = selected.get("selection", {}).get("rows", []) if selected else []
-    if sel_rows:
-        clicked_bldg = bldg_labels[sel_rows[0]] if sel_rows[0] < len(bldg_labels) else None
-        if clicked_bldg:
-            st.session_state['bldg_detail_sel'] = clicked_bldg
+    with tbl_col:
+        st.write(f"**{len(filtered)}** buildings — click a row to view details")
+        selected = st.dataframe(
+            styled, use_container_width=True, hide_index=True, height=600,
+            on_select="rerun", selection_mode="single-row", key="bldg_table"
+        )
+        sel_rows = selected.get("selection", {}).get("rows", []) if selected else []
+        if sel_rows and sel_rows[0] < len(bldg_labels):
+            st.session_state['bldg_detail_sel'] = bldg_labels[sel_rows[0]]
 
-    st.divider()
-    st.markdown('<div class="section-title">Building Detail</div>', unsafe_allow_html=True)
+    with det_col:
+        default_idx = 0
+        if st.session_state.get('bldg_detail_sel') in bldg_labels:
+            default_idx = bldg_labels.index(st.session_state['bldg_detail_sel'])
 
-    default_idx = 0
-    if st.session_state.get('bldg_detail_sel') in bldg_labels:
-        default_idx = bldg_labels.index(st.session_state['bldg_detail_sel'])
+        bnum = st.selectbox("Building", bldg_labels, index=default_idx, key='bldg_detail_sel')
+        if bnum:
+            sel_num = bnum.split(' — ')[0]
+            b = db.get_building(sel_num)
+            if b:
+                # Building image
+                img_path = get_local_building_image(sel_num)
+                img_b64, img_ext = db.get_building_image(sel_num)
+                if img_path:
+                    st.image(img_path, use_container_width=True)
+                elif img_b64:
+                    st.image(f"data:image/{img_ext};base64,{img_b64}", use_container_width=True)
 
-    bnum = st.selectbox("Select building for full details", bldg_labels,
-                        index=default_idx, key='bldg_detail_sel')
-    if bnum:
-        sel_num = bnum.split(' — ')[0]
-        b = db.get_building(sel_num)
-        if b:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown('<div class="section-title">Building Info</div>', unsafe_allow_html=True)
-                for lbl, val in [('Address', b.get('address')), ('City/State', f"{b.get('city','')}, {b.get('state','')} {b.get('zip','')}"),
-                                  ('Built', b.get('built')), ('Sq Ft', f"{(b.get('sq_ft') or 0):,}"),
-                                  ('District', b.get('district')), ('Auxiliary', b.get('aux'))]:
-                    st.write(f"**{lbl}:** {val or '—'}")
-            with c2:
-                st.markdown('<div class="section-title">Panel & Network</div>', unsafe_allow_html=True)
-                for lbl, val in [('Panel Type', b.get('panel_type')), ('Year Installed', b.get('year_installed')),
-                                  ('System Age', f"{b.get('age','—')} years"), ('Gateway IP', b.get('gateway_ip')),
-                                  ('ANX IP', b.get('anx_ip')), ('FocalPoint Name', b.get('focalpoint_name')),
-                                  ('Panel Location', b.get('panel_location')), ('AIM Asset #', b.get('aim_asset'))]:
-                    st.write(f"**{lbl}:** {val or '—'}")
-            with c3:
-                st.markdown('<div class="section-title">Device Counts</div>', unsafe_allow_html=True)
-                devs = {
-                    'Smoke Detectors': b.get('smoke'),
-                    'Heat Detectors': b.get('heat'),
-                    'Pull Stations': b.get('pull'),
-                    'Duct Detectors': b.get('duct'),
-                    'Initiating (Total)': b.get('init_devices'),
-                    'Notification (Total)': b.get('notif_devices'),
-                    'Transponders': b.get('transponders'),
-                    'Nodes': b.get('nodes'),
-                }
-                for k, v in devs.items():
-                    st.write(f"**{k}:** {int(v) if v else '—'}")
+                # Info in tabs
+                tab_info, tab_panel, tab_devices, tab_history = st.tabs(
+                    ["📋 Info", "⚡ Panel & Network", "🔢 Devices", "📁 History"])
 
-            # Inspection history for building
-            hist = db.get_inspections(sel_num)
-            if hist:
-                st.markdown('<div class="section-title">Inspection History</div>', unsafe_allow_html=True)
-                hist_df = pd.DataFrame([{
-                    'Date': h['inspection_date'],
-                    'Result': h['result'],
-                    '% Tested': f"{h['pct_tested']:.0f}%",
-                    'Deficiencies': len(json.loads(h['deficiencies'] or '[]')),
-                    'WO#': h['work_order'],
-                    'Inspector': h['inspector_name']
-                } for h in hist])
-                st.dataframe(hist_df, use_container_width=True, hide_index=True)
+                with tab_info:
+                    for lbl, val in [
+                        ('Address', b.get('address')),
+                        ('City/State', f"{b.get('city','')}, {b.get('state','')} {b.get('zip','')}"),
+                        ('District', b.get('district')),
+                        ('Built', b.get('built')),
+                        ('Sq Ft', f"{(b.get('sq_ft') or 0):,}"),
+                        ('Auxiliary', b.get('aux')),
+                        ('Insp Month', b.get('inspection_month')),
+                        ('Priority', b.get('replacement_priority')),
+                    ]:
+                        st.write(f"**{lbl}:** {val or '—'}")
 
-            ba1, ba2 = st.columns(2)
-            with ba1:
-                if st.button("📋 Start Inspection", key=f'bldg_insp_{sel_num}', use_container_width=True, type="primary"):
-                    st.session_state['prefill_bldg'] = sel_num
-                    st.session_state['nav_target'] = '📋  New Inspection'
-                    st.rerun()
-            with ba2:
-                if st.button("✏️ Edit Building Info", key=f'bldg_edit_{sel_num}', use_container_width=True):
-                    st.session_state['edit_bldg_num'] = sel_num
-                    st.session_state['nav_target'] = '✏️  Edit Building'
-                    st.rerun()
+                with tab_panel:
+                    for lbl, val in [
+                        ('Panel Type', b.get('panel_type')),
+                        ('Year Installed', b.get('year_installed')),
+                        ('System Age', f"{b.get('age','—')} yrs"),
+                        ('FocalPoint Name', b.get('focalpoint_name')),
+                        ('Panel Location', b.get('panel_location')),
+                        ('Gateway IP', b.get('gateway_ip')),
+                        ('ANX IP', b.get('anx_ip')),
+                        ('Subnet', b.get('subnet')),
+                        ('VLAN', b.get('vlan')),
+                        ('AIM Asset #', b.get('aim_asset')),
+                    ]:
+                        st.write(f"**{lbl}:** {val or '—'}")
+
+                with tab_devices:
+                    for lbl, val in [
+                        ('Initiating (Total)', b.get('init_devices')),
+                        ('Notification (Total)', b.get('notif_devices')),
+                        ('Smoke Detectors', b.get('smoke')),
+                        ('Heat Detectors', b.get('heat')),
+                        ('Pull Stations', b.get('pull')),
+                        ('Duct Detectors', b.get('duct')),
+                        ('Transponders', b.get('transponders')),
+                        ('Nodes', b.get('nodes')),
+                        ('Time to Test (hrs)', b.get('time_to_test')),
+                    ]:
+                        display = int(float(val)) if val not in (None, '', 0) else '—'
+                        st.write(f"**{lbl}:** {display}")
+
+                with tab_history:
+                    hist = db.get_inspections(sel_num)
+                    if hist:
+                        hist_df = pd.DataFrame([{
+                            'Date': h['inspection_date'],
+                            'Result': h['result'],
+                            '% Tested': f"{h.get('pct_tested') or 0:.0f}%",
+                            'Deficiencies': len(json.loads(h['deficiencies'] or '[]')) if isinstance(h.get('deficiencies'), str) else len(h.get('deficiencies') or []),
+                            'Inspector': h.get('inspector_name','')
+                        } for h in hist])
+                        st.dataframe(hist_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No inspection history")
+
+                st.divider()
+                ba1, ba2 = st.columns(2)
+                with ba1:
+                    if st.button("📋 Start Inspection", key=f'bldg_insp_{sel_num}',
+                                 use_container_width=True, type="primary"):
+                        st.session_state['prefill_bldg'] = sel_num
+                        st.session_state['nav_target'] = '📋  New Inspection'
+                        st.rerun()
+                with ba2:
+                    if st.button("✏️ Edit Building", key=f'bldg_edit_{sel_num}',
+                                 use_container_width=True):
+                        st.session_state['edit_bldg_num'] = sel_num
+                        st.session_state['nav_target'] = '✏️  Edit Building'
+                        st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # NEW INSPECTION REPORT
