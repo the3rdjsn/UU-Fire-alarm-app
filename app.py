@@ -252,7 +252,7 @@ if page == "📊  Dashboard":
         </div>
     </div>''', unsafe_allow_html=True)
 
-      stats = db.get_dashboard_stats()
+    stats = db.get_dashboard_stats()
     done = stats.get("complete", stats.get("inspections_complete", 0))
     scheduled = stats.get("scheduled", 0)
     done_pct = round(done / scheduled * 100) if scheduled else 0
