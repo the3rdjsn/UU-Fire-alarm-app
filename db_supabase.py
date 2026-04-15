@@ -8,16 +8,18 @@ import os, json
 import streamlit as st
 from datetime import date
 
+from db_config import using_supabase, validate_db_config
 from normalize_utils import clean_seed_payload, normalize_bldg_num
 
 logger = logging.getLogger(__name__)
 
 # ── Connection ────────────────────────────────────────────────────────────────
 def _use_supabase():
-    return bool(os.environ.get('SUPABASE_URL') and os.environ.get('SUPABASE_KEY'))
+    return using_supabase()
 
 @st.cache_resource
 def _get_supabase():
+    validate_db_config()
     from supabase import create_client
     url = os.environ['SUPABASE_URL']
     key = os.environ['SUPABASE_KEY']
@@ -310,3 +312,10 @@ def search_devices(search, type_f, bldg_f):
     if search and not data:
         data = sb.table('devices').select('building,type,point,description')            .ilike('description', f'%{search}%').order('building').limit(2000).execute().data
     return pd.DataFrame(data, columns=['building','type','point','description'])             .rename(columns={'building':'Building','type':'Type','point':'Point','description':'Description'})
+
+
+def delete_inspection(insp_id):
+    if not _use_supabase():
+        import db as _s
+        return _s.delete_inspection(insp_id)
+    _sb().table('inspections').delete().eq('id', insp_id).execute()

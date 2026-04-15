@@ -162,20 +162,23 @@ thead tr th { background: #1a1a1a !important; color: white !important; }
 # ── INIT DB ──────────────────────────────────────────────────────────────────
 @st.cache_resource
 def init():
+    mode = validate_db_config()
     # Look for data files next to app.py, then /tmp as fallback
     app_dir = os.path.dirname(os.path.abspath(__file__))
     def load_json(name):
         local = os.path.join(app_dir, name)
         fallback = os.path.join('/tmp', name)
         path = local if os.path.exists(local) else fallback
-        with open(path) as f: return json.load(f)
+        with open(path) as f:
+            return json.load(f)
     buildings = load_json('buildings_clean.json')
-    schedule   = load_json('schedule_clean.json')
-    devices    = load_json('device_rows.json')
+    schedule = load_json('schedule_clean.json')
+    devices = load_json('device_rows.json')
     db.init_db(buildings, schedule, devices)
-    return True
+    return mode
 
-init()
+active_db_mode = init()
+st.caption(f"Database mode: **{active_db_mode}**")
 db.refresh_overdue_statuses()  # Recalculate overdue based on current month
 
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
@@ -1102,9 +1105,7 @@ elif page == "📁  Inspection History":
                     st.rerun()
             with hb3:
                 if st.button("🗑 Delete", key=f"del_insp_{insp['id']}", use_container_width=True):
-                    with db.get_conn() as conn:
-                        conn.execute('DELETE FROM inspections WHERE id=?', (insp['id'],))
-                        conn.commit()
+                    db.delete_inspection(insp['id'])
                     st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
