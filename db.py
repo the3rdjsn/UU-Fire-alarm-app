@@ -42,11 +42,32 @@ def parse_schedule_date(value):
     except Exception:
         return None
 
+def infer_last_inspection_date_from_month(month_value, today=None):
+    today = today or date.today()
+    month = str(month_value or '').strip()
+    if month not in MONTHS_LIST:
+        return None
+    month_num = MONTHS_LIST.index(month) + 1
+    year = today.year - 1 if month_num > today.month else today.year
+    try:
+        return date(year, month_num, 1)
+    except Exception:
+        return None
+
 def is_schedule_overdue(row, today=None):
     today = today or date.today()
     status = str(row.get('status') or '').strip()
     if status in ('Complete', 'Construction'):
         return False
+
+    last_inspection_date = parse_schedule_date(row.get('inspection_date'))
+    if last_inspection_date is None:
+        last_inspection_date = infer_last_inspection_date_from_month(row.get('month'), today=today)
+
+    if last_inspection_date is None:
+        return False
+
+    return (today - last_inspection_date).days > 365
 
     sched_date = parse_schedule_date(row.get('inspection_date'))
     if sched_date is not None:
@@ -328,7 +349,7 @@ def get_dashboard_stats():
         }
 
 def refresh_overdue_statuses():
-    """Recalculate overdue status using inspection_date when available, with month fallback."""
+    """Recalculate overdue status using a one-year inspection cycle."""
     today = date.today()
     with get_conn() as conn:
         rows = [dict(r) for r in conn.execute(
