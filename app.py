@@ -220,7 +220,7 @@ with st.sidebar:
         st.image(LOGO_PATH, use_container_width=True)
     else:
         st.markdown("**DEPARTMENT OF FIRE SYSTEMS**")
-    st.caption("Department of Fire Systems · EST 2014")
+    st.caption("Solving problems you didn't know you had · est 2014")
     st.divider()
 
     NAV_OPTIONS = [
