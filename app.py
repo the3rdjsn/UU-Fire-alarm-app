@@ -8,6 +8,22 @@ from datetime import date, datetime
 sys.path.insert(0, os.path.dirname(__file__))
 import db_supabase as db
 from db_config import validate_db_config, get_db_mode
+def get_local_building_image(bldg_num):
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        images_dir = os.path.join(base_dir, "images")
+
+        target = str(bldg_num).split(".")[0].strip()
+
+        for ext in ["png", "jpg", "jpeg", "webp"]:
+            path = os.path.join(images_dir, f"{target}.{ext}")
+            if os.path.exists(path):
+                return path
+
+        return None
+    except:
+        return None
+
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -1185,11 +1201,14 @@ elif page == "✏️  Edit Building":
     st.markdown('<div class="section-title">Building Image</div>', unsafe_allow_html=True)
     img_col, upload_col = st.columns([1, 1])
     with img_col:
-        img_b64, img_ext = db.get_building_image(sel_num_e)
-        if img_b64:
+        img_path = get_local_building_image(sel_num_e)
+
+        if img_path:
+            st.image(img_path, use_container_width=True)
+        elif img_b64:
             st.image(f"data:image/{img_ext};base64,{img_b64}", caption=eb['name'], use_container_width=True)
         else:
-            st.info("No image uploaded for this building")
+            st.info("No building image found")
     with upload_col:
         uploaded_img = st.file_uploader("Upload Building Image", type=['jpg','jpeg','png'],
                                          key=f'img_upload_{sel_num_e}',

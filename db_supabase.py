@@ -251,21 +251,21 @@ def get_dashboard_stats():
             except:
                 pass
 
-      return {
-    "total_systems": total,
-    "complete": complete,
-    "scheduled": scheduled,
-    "overdue": overdue,
-    "by_month": [],
-    "by_district": []
+        return {
+            "total_systems": total,
+            "complete": complete,
+            "scheduled": scheduled,
+            "overdue": overdue,
+            "by_month": [],
+            "by_district": []
         }
 
     except:
-      return {
-    "total_systems": 0,
-    "complete": 0,
-    "scheduled": 0,
-    "overdue": 0,
-    "by_month": [],
-    "by_district": []
+        return {
+            "total_systems": 0,
+            "complete": 0,
+            "scheduled": 0,
+            "overdue": 0,
+            "by_month": [],
+            "by_district": []
         }
