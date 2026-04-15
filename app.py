@@ -921,9 +921,58 @@ elif page == "📋  New Inspection":
         if 'deficiencies' not in st.session_state:
             st.session_state.deficiencies = []
 
-        if st.button("➕ Add Deficiency"):
-            st.session_state.deficiencies.append(
-                {'device': '', 'location': '', 'issue': '', 'part': '', 'corrected': 'No'})
+        # Auto-populate deficiencies from failed FP devices
+        fp_results_key = f'fp_results_{sel_num}'
+        fp_res_cur = st.session_state.get(fp_results_key, {})
+        if fp_res_cur and fp_devices:
+            existing_points = {d.get('location','') for d in st.session_state.deficiencies}
+            for idx_str, result in fp_res_cur.items():
+                if result == 'Fail':
+                    try:
+                        dev = fp_devices[int(idx_str)]
+                        point = str(dev.get('point', idx_str))
+                        if point not in existing_points:
+                            dtype = str(dev.get('type', ''))
+                            desc  = str(dev.get('description', ''))
+                            st.session_state.deficiencies.append({
+                                'device':    dtype,
+                                'location':  point,
+                                'issue':     f"FAILED — {desc}" if desc else "FAILED",
+                                'part':      '',
+                                'corrected': 'No',
+                            })
+                            existing_points.add(point)
+                    except (IndexError, ValueError):
+                        pass
+
+        col_add, col_clear = st.columns([1, 1])
+        with col_add:
+            if st.button("➕ Add Deficiency"):
+                st.session_state.deficiencies.append(
+                    {'device': '', 'location': '', 'issue': '', 'part': '', 'corrected': 'No'})
+        with col_clear:
+            if st.button("🔄 Sync Failed Devices", help="Re-pull all Fail results from FocalPoint list"):
+                existing_points = set()
+                st.session_state.deficiencies = []
+                for idx_str, result in fp_res_cur.items():
+                    if result == 'Fail':
+                        try:
+                            dev = fp_devices[int(idx_str)]
+                            point = str(dev.get('point', idx_str))
+                            if point not in existing_points:
+                                dtype = str(dev.get('type', ''))
+                                desc  = str(dev.get('description', ''))
+                                st.session_state.deficiencies.append({
+                                    'device':    dtype,
+                                    'location':  point,
+                                    'issue':     f"FAILED — {desc}" if desc else "FAILED",
+                                    'part':      '',
+                                    'corrected': 'No',
+                                })
+                                existing_points.add(point)
+                        except (IndexError, ValueError):
+                            pass
+                st.rerun()
 
         for i, d in enumerate(st.session_state.deficiencies):
             with st.container():
