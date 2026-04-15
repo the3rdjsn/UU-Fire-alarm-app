@@ -399,3 +399,8 @@ def search_devices(search, type_f, bldg_f):
         q += ' ORDER BY building, type, point LIMIT 2000'
         rows = conn.execute(q, params).fetchall()
     return pd.DataFrame(rows, columns=['Building','Type','Point','Description'])
+
+def delete_inspection(insp_id):
+    with get_conn() as conn:
+        conn.execute('DELETE FROM inspections WHERE id=?', (insp_id,))
+        conn.commit()

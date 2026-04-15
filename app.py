@@ -1122,9 +1122,7 @@ elif page == "📁  Inspection History":
                     st.rerun()
             with hb3:
                 if st.button("🗑 Delete", key=f"del_insp_{insp['id']}", use_container_width=True):
-                    with db.get_conn() as conn:
-                        conn.execute('DELETE FROM inspections WHERE id=?', (insp['id'],))
-                        conn.commit()
+                    db.delete_inspection(insp['id'])
                     st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
