@@ -176,7 +176,7 @@ def init():
     return mode
 
 active_db_mode = init()
-db.refresh_overdue_statuses()
+
 
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
 
