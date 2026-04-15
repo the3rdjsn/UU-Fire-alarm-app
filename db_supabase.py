@@ -99,3 +99,20 @@ def get_buildings():
 
     res = _sb().table("buildings").select("*").order("bldg_num", desc=False).execute()
     return res.data or []
+def get_building(bldg_num):
+    if not _use_supabase():
+        import db as _s
+        return _s.get_building(bldg_num)
+
+    target = str(bldg_num).split(".")[0].strip()
+
+    res = (
+        _sb()
+        .table("buildings")
+        .select("*")
+        .eq("bldg_num", target)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    return rows[0] if rows else None
