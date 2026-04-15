@@ -1,3 +1,4 @@
+import logging
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -6,6 +7,7 @@ import json, os, sys
 from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 import db_supabase as db
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
