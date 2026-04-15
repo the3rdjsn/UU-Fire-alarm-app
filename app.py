@@ -523,7 +523,13 @@ elif page == "🏢  Buildings":
         panel_f = st.selectbox("Panel Type", ['All'] + sorted(set(
             b['panel_type'] for b in buildings if b.get('panel_type') and isinstance(b.get('panel_type'),str))))
 
-    filtered = buildings
+    # Sort numerically (1, 2, 3... not 1, 10, 11...)
+    def _bldg_sort_key(b):
+        n = str(b.get('bldg_num') or '')
+        try: return (0, int(n))
+        except: return (1, n)
+
+    filtered = sorted(buildings, key=_bldg_sort_key)
     if search:
         q = search.lower()
         filtered = [b for b in filtered if q in str(b.get('name','')).lower()
@@ -538,18 +544,22 @@ elif page == "🏢  Buildings":
 
     st.write(f"**{len(filtered)}** buildings")
 
+    def _i(v):
+        try: return int(float(v)) if v not in (None, '') else ''
+        except: return v
+
     # Show as dataframe
     df = pd.DataFrame([{
         '#': b['bldg_num'],
         'Building': b['name'],
         'District': b['district'],
         'Panel': b['panel_type'],
-        'Age (Yrs)': b['age'],
+        'Age (Yrs)': _i(b['age']),
         'Insp Month': b['inspection_month'],
-        'Init Dev': b['init_devices'],
-        'Nodes': b['nodes'],
+        'Init Dev': _i(b['init_devices']),
+        'Nodes': _i(b['nodes']),
         'Gateway': b['gateway'],
-        'Priority': b['replacement_priority'],
+        'Priority': _i(b['replacement_priority']),
     } for b in filtered])
 
     def color_age(val):
