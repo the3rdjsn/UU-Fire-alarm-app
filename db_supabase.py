@@ -218,11 +218,12 @@ def refresh_overdue_statuses():
     all_sched = sb.table('schedule').select('id,month,status,inspection_date').execute().data
     for row in all_sched:
         status = str(row.get('status') or '').strip()
-        if status in ('Complete', 'Construction'):
+        if status in ('Complete', 'Construction', 'Overdue'):
             continue
-        new_status = 'Overdue' if is_schedule_overdue(row, today=today) else 'Pending'
-        if status != new_status:
-            sb.table('schedule').update({'status': new_status}).eq('id', row['id']).execute()
+        if status not in ('Pending', 'In Progress', ''):
+            continue
+        if is_schedule_overdue(row, today=today):
+            sb.table('schedule').update({'status': 'Overdue'}).eq('id', row['id']).execute()
 
 # ── Buildings ─────────────────────────────────────────────────────────────────
 def get_buildings():

@@ -349,7 +349,12 @@ def get_dashboard_stats():
         }
 
 def refresh_overdue_statuses():
-    """Recalculate overdue status using a one-year inspection cycle."""
+    """Mark open schedule rows as overdue without overwriting manual workflow states.
+
+    This only auto-promotes open items (Pending / In Progress) to Overdue when the
+    one-year rule is met. It does not force rows back to Pending, which lets manual
+    saved statuses persist across reruns.
+    """
     today = date.today()
     with get_conn() as conn:
         rows = [dict(r) for r in conn.execute(
@@ -357,11 +362,12 @@ def refresh_overdue_statuses():
         ).fetchall()]
         for row in rows:
             status = str(row.get('status') or '').strip()
-            if status in ('Complete', 'Construction'):
+            if status in ('Complete', 'Construction', 'Overdue'):
                 continue
-            new_status = 'Overdue' if is_schedule_overdue(row, today=today) else 'Pending'
-            if status != new_status:
-                conn.execute('UPDATE schedule SET status=? WHERE id=?', (new_status, row['id']))
+            if status not in ('Pending', 'In Progress', ''):
+                continue
+            if is_schedule_overdue(row, today=today):
+                conn.execute('UPDATE schedule SET status=? WHERE id=?', ('Overdue', row['id']))
         conn.commit()
 
 def get_inspection(insp_id):
