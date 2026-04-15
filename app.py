@@ -626,12 +626,30 @@ elif page == "🏢  Buildings":
             styled = df.style
     except Exception:
         styled = df.style
-    st.dataframe(styled, use_container_width=True, hide_index=True, height=500)
+    # Clickable table — selecting a row jumps to that building's detail
+    bldg_labels = [f"{b['bldg_num']} — {b['name']}" for b in filtered]
+
+    selected = st.dataframe(
+        styled, use_container_width=True, hide_index=True, height=500,
+        on_select="rerun", selection_mode="single-row", key="bldg_table"
+    )
+
+    # Resolve selected building: row click takes priority over selectbox
+    sel_rows = selected.get("selection", {}).get("rows", []) if selected else []
+    if sel_rows:
+        clicked_bldg = bldg_labels[sel_rows[0]] if sel_rows[0] < len(bldg_labels) else None
+        if clicked_bldg:
+            st.session_state['bldg_detail_sel'] = clicked_bldg
 
     st.divider()
     st.markdown('<div class="section-title">Building Detail</div>', unsafe_allow_html=True)
-    bnum = st.selectbox("Select building for full details",
-                        [f"{b['bldg_num']} — {b['name']}" for b in filtered])
+
+    default_idx = 0
+    if st.session_state.get('bldg_detail_sel') in bldg_labels:
+        default_idx = bldg_labels.index(st.session_state['bldg_detail_sel'])
+
+    bnum = st.selectbox("Select building for full details", bldg_labels,
+                        index=default_idx, key='bldg_detail_sel')
     if bnum:
         sel_num = bnum.split(' — ')[0]
         b = db.get_building(sel_num)
