@@ -38,47 +38,52 @@ def _seed_supabase(buildings, schedule, devices):
     # ── Buildings ──────────────────────────────────────────────────────────────
     existing = sb.table('buildings').select('bldg_num').execute()
     if not existing.data:
+        def _safe_int(v):
+            try: n = int(float(str(v))); return n if n else None
+            except: return None
+        def _safe_float(v):
+            try: n = float(str(v)); return n if n else None
+            except: return None
         rows = []
         for b in buildings:
-            bldg_num = str(b.get('bldg_num','')).split('.')[0].strip()
-            if not bldg_num:
-                continue
+            # Support both raw JSON keys and pre-mapped keys
+            bldg_num = str(b.get('Bldg #') or b.get('bldg_num') or '').split('.')[0].strip()
+            if not bldg_num or bldg_num == 'None': continue
             rows.append({
                 'bldg_num':             bldg_num,
-                'name':                 b.get('building_name') or b.get('name',''),
-                'report_name':          b.get('report_name',''),
-                'district':             b.get('district',''),
-                'address':              b.get('address',''),
-                'city':                 b.get('city',''),
-                'state':                b.get('state',''),
-                'zip':                  str(b.get('zip','') or ''),
-                'built':                int(b.get('built') or 0) or None,
-                'sq_ft':                int(b.get('sq_ft') or 0) or None,
-                'aux':                  b.get('aux',''),
-                'panel_type':           b.get('panel_type',''),
-                'year_installed':       int(b.get('year_installed') or 0) or None,
-                'age':                  int(b.get('age') or 0) or None,
-                'gateway':              b.get('gateway',''),
-                'inspection_month':     b.get('inspection_month',''),
-                'replacement_priority': int(b.get('replacement_priority') or 0) or None,
-                'gateway_ip':           b.get('gateway_ip',''),
-                'anx_ip':               b.get('anx_ip',''),
-                'subnet':               b.get('subnet',''),
-                'vlan':                 str(b.get('vlan','') or ''),
-                'nodes':                int(b.get('nodes') or 0) or None,
-                'transponders':         int(b.get('transponders') or 0) or None,
-                'smoke':                int(b.get('smoke') or 0) or None,
-                'heat':                 int(b.get('heat') or 0) or None,
-                'pull':                 int(b.get('pull') or 0) or None,
-                'duct':                 int(b.get('duct') or 0) or None,
-                'init_devices':         int(b.get('init_devices') or 0) or None,
-                'notif_devices':        float(b.get('notif_devices') or 0) or None,
-                'panel_location':       b.get('panel_location',''),
-                'focalpoint_name':      b.get('focalpoint_name',''),
-                'time_to_test':         int(b.get('time_to_test') or 0) or None,
+                'name':                 b.get('Building Name') or b.get('building_name') or b.get('name',''),
+                'report_name':          b.get('Report Name') or b.get('report_name',''),
+                'district':             b.get('District') or b.get('district',''),
+                'address':              b.get('Street Address') or b.get('address',''),
+                'city':                 b.get('City') or b.get('city',''),
+                'state':                b.get('State') or b.get('state',''),
+                'zip':                  str(b.get('Zip') or b.get('zip','') or ''),
+                'built':                _safe_int(b.get('Built') or b.get('built')),
+                'sq_ft':                _safe_int(b.get('Gross Sq Ft') or b.get('sq_ft')),
+                'aux':                  b.get('Aux (Yes/No)') or b.get('aux',''),
+                'panel_type':           b.get('Panel Type') or b.get('panel_type',''),
+                'year_installed':       _safe_int(b.get('Year Installed') or b.get('year_installed')),
+                'age':                  _safe_int(b.get('Age Of System') or b.get('age')),
+                'gateway':              b.get('Gateway  (Yes/No)') or b.get('gateway',''),
+                'inspection_month':     b.get('Inspection Month') or b.get('inspection_month',''),
+                'replacement_priority': _safe_int(b.get('Critical Replacement (1-5, 5 Being Most Critical)') or b.get('replacement_priority')),
+                'gateway_ip':           b.get('Gateway Ip Addresses') or b.get('gateway_ip',''),
+                'anx_ip':               b.get('Anx Ip Addresses') or b.get('anx_ip',''),
+                'subnet':               b.get('Subnet') or b.get('subnet',''),
+                'vlan':                 str(b.get('Vlan') or b.get('vlan','') or ''),
+                'nodes':                _safe_int(b.get('Nodes') or b.get('nodes')),
+                'transponders':         _safe_int(b.get('Transponders') or b.get('transponders')),
+                'smoke':                _safe_int(b.get('Smoke Detectors') or b.get('smoke')),
+                'heat':                 _safe_int(b.get('Heat Detectors') or b.get('heat')),
+                'pull':                 _safe_int(b.get('Pull Stations') or b.get('pull')),
+                'duct':                 _safe_int(b.get('Duct Dectors') or b.get('duct')),
+                'init_devices':         _safe_int(b.get('Intitiation Devices') or b.get('init_devices')),
+                'notif_devices':        _safe_float(b.get('Notification Devices') or b.get('notif_devices')),
+                'panel_location':       b.get('Panel Location') or b.get('panel_location',''),
+                'focalpoint_name':      b.get('FocalPoint Name') or b.get('focalpoint_name',''),
+                'time_to_test':         _safe_int(b.get('Time To Test') or b.get('time_to_test')),
                 'aim_asset':            b.get('aim_asset',''),
             })
-        # Insert in batches of 100
         for i in range(0, len(rows), 100):
             sb.table('buildings').insert(rows[i:i+100]).execute()
 

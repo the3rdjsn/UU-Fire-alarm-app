@@ -540,9 +540,15 @@ elif page == "🏢  Buildings":
         return ''
 
     try:
-        styled = df.style.map(color_age, subset=['Age (Yrs)'])
-    except AttributeError:
-        styled = df.style.applymap(color_age, subset=['Age (Yrs)'])
+        if 'Age (Yrs)' in df.columns and df['Age (Yrs)'].notna().any():
+            try:
+                styled = df.style.map(color_age, subset=['Age (Yrs)'])
+            except AttributeError:
+                styled = df.style.applymap(color_age, subset=['Age (Yrs)'])
+        else:
+            styled = df.style
+    except Exception:
+        styled = df.style
     st.dataframe(styled, use_container_width=True, hide_index=True, height=500)
 
     st.divider()
