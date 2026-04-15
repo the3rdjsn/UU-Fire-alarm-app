@@ -80,3 +80,15 @@ def get_dashboard_stats():
         "by_month": by_month,
         "by_district": by_district,
     }
+def get_schedule(month=None):
+    if not _use_supabase():
+        import db as _s
+        return _s.get_schedule(month)
+
+    query = _sb().table("schedule").select("*").order("inspection_date", desc=False)
+
+    if month and month != "All":
+        query = query.eq("month", month)
+
+    res = query.execute()
+    return res.data or []
