@@ -92,3 +92,10 @@ def get_schedule(month=None):
 
     res = query.execute()
     return res.data or []
+def get_buildings():
+    if not _use_supabase():
+        import db as _s
+        return _s.get_buildings()
+
+    res = _sb().table("buildings").select("*").order("bldg_num", desc=False).execute()
+    return res.data or []
