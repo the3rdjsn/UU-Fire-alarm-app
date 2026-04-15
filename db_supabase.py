@@ -199,7 +199,9 @@ def get_inspections(bldg_num=None):
 
     if bldg_num:
         target = str(bldg_num).split(".")[0].strip()
-        query = query.eq("building", target)
+
+        # Most likely correct column
+        query = query.eq("bldg_num", target)
 
     res = query.execute()
     return res.data or []
