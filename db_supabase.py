@@ -251,21 +251,51 @@ def get_dashboard_stats():
             except:
                 pass
 
+        # Sum init_devices across all buildings
+        init_devices = sum(int(b.get('init_devices') or 0) for b in buildings)
+
+        # by_month aggregation
+        month_counts = {}
+        for r in schedule:
+            m = r.get('month', '')
+            if m not in month_counts:
+                month_counts[m] = {'month': m, 'total': 0, 'complete': 0, 'overdue': 0}
+            month_counts[m]['total'] += 1
+            if r.get('status') == 'Complete': month_counts[m]['complete'] += 1
+            if r.get('status') == 'Overdue':  month_counts[m]['overdue'] += 1
+
+        # by_district aggregation
+        dist_counts = {}
+        for r in schedule:
+            d = r.get('district', '')
+            if d not in dist_counts:
+                dist_counts[d] = {'district': d, 'cnt': 0, 'complete': 0}
+            dist_counts[d]['cnt'] += 1
+            if r.get('status') == 'Complete': dist_counts[d]['complete'] += 1
+
         return {
             "total_systems": total,
+            "total_buildings": total,
             "complete": complete,
             "scheduled": scheduled,
             "overdue": overdue,
-            "by_month": [],
-            "by_district": []
+            "init_devices": init_devices,
+            "saved_reports": len(inspections),
+            "done_pct": round(complete / scheduled * 100) if scheduled else 0,
+            "by_month": list(month_counts.values()),
+            "by_district": list(dist_counts.values()),
         }
 
     except:
         return {
             "total_systems": 0,
+            "total_buildings": 0,
             "complete": 0,
             "scheduled": 0,
             "overdue": 0,
+            "init_devices": 0,
+            "saved_reports": 0,
+            "done_pct": 0,
             "by_month": [],
-            "by_district": []
+            "by_district": [],
         }
