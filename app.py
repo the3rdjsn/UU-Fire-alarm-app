@@ -1200,6 +1200,7 @@ elif page == "✏️  Edit Building":
     img_col, upload_col = st.columns([1, 1])
     with img_col:
         img_path = get_local_building_image(sel_num_e)
+        img_b64, img_ext = db.get_building_image(sel_num_e)
 
         if img_path:
             st.image(img_path, use_container_width=True)
@@ -1536,4 +1537,3 @@ elif page == "🖨️  Print Report":
             st.rerun()
     with c3:
         st.caption("💡 In print dialog: set **Margins → None**, enable **Background graphics** for best results.")
-
