@@ -27,8 +27,8 @@ def get_dashboard_stats():
 
     sb = _sb()
 
-    buildings = sb.table("buildings").select("id, init_devices").execute().data or []
-    schedule = sb.table("schedule").select("id, status").execute().data or []
+    buildings = sb.table("buildings").select("id, init_devices, district").execute().data or []
+    schedule = sb.table("schedule").select("id, month, district, status").execute().data or []
     inspections = sb.table("inspections").select("id").execute().data or []
 
     total_systems = len(buildings)
@@ -38,6 +38,38 @@ def get_dashboard_stats():
     complete = sum(1 for r in schedule if (r.get("status") or "") == "Complete")
     overdue = sum(1 for r in schedule if (r.get("status") or "") == "Overdue")
 
+    month_order = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+
+    by_month_map = {
+        m: {"month": m, "total": 0, "done": 0, "complete": 0}
+        for m in month_order
+    }
+
+    for row in schedule:
+        month = row.get("month")
+        status = (row.get("status") or "").strip()
+        if month in by_month_map:
+            by_month_map[month]["total"] += 1
+            if status == "Complete":
+                by_month_map[month]["done"] += 1
+                by_month_map[month]["complete"] += 1
+
+    by_month = [by_month_map[m] for m in month_order]
+
+    district_counts = {}
+    for b in buildings:
+        district = (b.get("district") or "").strip()
+        if district:
+            district_counts[district] = district_counts.get(district, 0) + 1
+
+    by_district = [
+        {"district": district, "cnt": count}
+        for district, count in sorted(district_counts.items(), key=lambda x: x[1], reverse=True)
+    ]
+
     return {
         "total_systems": total_systems,
         "complete": complete,
@@ -45,4 +77,6 @@ def get_dashboard_stats():
         "overdue": overdue,
         "init_devices": total_devices,
         "reports_saved": len(inspections),
+        "by_month": by_month,
+        "by_district": by_district,
     }
