@@ -1807,67 +1807,88 @@ elif page == "🚿  Sprinkler":
 
     # ── TAB 4: COMPONENT INVENTORY ───────────────────────────────────────────
     with sp_tab4:
-        bldgs_opts, floors_opts, systems_opts, comps_opts = dbs.get_inventory_filter_options()
-
         st.markdown('<div class="section-title">Search Sprinkler Components</div>', unsafe_allow_html=True)
 
-        # Filters row 1
+        # Load full inventory once into session state — all filtering done locally
+        if 'sp_inv_df' not in st.session_state:
+            with st.spinner("Loading inventory (one-time)..."):
+                raw = dbs.get_full_inventory()
+            if raw:
+                st.session_state['sp_inv_df'] = pd.DataFrame(raw)
+            else:
+                st.warning("No inventory data found. Run the Supabase seed SQL first.")
+                st.stop()
+
+        df_all = st.session_state['sp_inv_df']
+
+        # Build filter options from local data — instant, no DB call
+        bldg_map = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
+
+        def _bnum_label(n):
+            name = bldg_map.get(str(n), '')
+            return f"{n} — {name}" if name else str(n)
+
+        all_bldgs   = sorted(df_all['bldg_num'].dropna().unique().tolist(),
+                             key=lambda x: (0, int(float(x))) if str(x).replace('.','').isdigit() else (1, str(x)))
+        all_floors  = sorted(df_all['floor'].dropna().unique().tolist())
+        all_systems = sorted(df_all['system_type'].dropna().unique().tolist())
+        all_comps   = sorted(df_all['component'].dropna().unique().tolist())
+
+        st.caption(f"{len(df_all):,} total components across {len(all_bldgs)} buildings — all filtering is instant")
+
+        # Filter row 1
         inv_c1, inv_c2, inv_c3 = st.columns([2, 1, 1])
         with inv_c1:
             inv_search = st.text_input("🔍 Free-text search", placeholder="Any field…", key='inv_search')
         with inv_c2:
-            inv_bldg = st.selectbox("Building", ['All'] + [
-                f"{n} — {dbs.get_sprinkler_buildings() and next((b['name'] for b in dbs.get_sprinkler_buildings() if b['bldg_num']==n), '') or ''}"
-                for n in bldgs_opts], key='inv_bldg')
+            bldg_labels_inv = ['All'] + [_bnum_label(n) for n in all_bldgs]
+            inv_bldg = st.selectbox("Building", bldg_labels_inv, key='inv_bldg')
         with inv_c3:
-            inv_floor = st.selectbox("Floor", ['All'] + floors_opts, key='inv_floor')
+            inv_floor = st.selectbox("Floor", ['All'] + all_floors, key='inv_floor')
 
-        # Filters row 2
+        # Filter row 2
         inv_c4, inv_c5, inv_c6 = st.columns([2, 2, 1])
         with inv_c4:
-            inv_system = st.selectbox("System Type", ['All'] + systems_opts, key='inv_system')
+            inv_system = st.selectbox("System Type", ['All'] + all_systems, key='inv_system')
         with inv_c5:
-            inv_comp = st.selectbox("Component", ['All'] + comps_opts, key='inv_comp')
+            inv_comp = st.selectbox("Component", ['All'] + all_comps, key='inv_comp')
         with inv_c6:
             st.markdown("<br>", unsafe_allow_html=True)
-            inv_search_btn = st.button("Search", type="primary", key='inv_go', use_container_width=True)
+            if st.button("🔄 Reload", key='inv_reload', use_container_width=True,
+                         help="Refresh inventory from database"):
+                del st.session_state['sp_inv_df']
+                st.rerun()
 
-        # Resolve bldg_num from label
+        # ── All filtering done locally in pandas — zero DB calls ─────────────
         inv_bnum = inv_bldg.split(' — ')[0] if inv_bldg != 'All' else 'All'
+        df = df_all.copy()
 
-        if inv_search_btn or inv_search or inv_bnum != 'All' or inv_floor != 'All' or inv_system != 'All' or inv_comp != 'All':
-            with st.spinner("Searching..."):
-                df_inv = dbs.search_sprinkler_inventory(
-                    bldg_num   = inv_bnum   if inv_bnum   != 'All' else None,
-                    floor      = inv_floor  if inv_floor  != 'All' else None,
-                    system_type= inv_system if inv_system != 'All' else None,
-                    component  = inv_comp   if inv_comp   != 'All' else None,
-                    search     = inv_search if inv_search else None,
-                )
+        if inv_bnum != 'All':
+            df = df[df['bldg_num'].astype(str) == str(inv_bnum)]
+        if inv_floor != 'All':
+            df = df[df['floor'] == inv_floor]
+        if inv_system != 'All':
+            df = df[df['system_type'] == inv_system]
+        if inv_comp != 'All':
+            df = df[df['component'] == inv_comp]
+        if inv_search:
+            s = inv_search.lower()
+            mask = df.apply(lambda row: any(s in str(v).lower() for v in row), axis=1)
+            df = df[mask]
 
-            if df_inv.empty:
-                st.info("No components found matching your filters.")
-            else:
-                # Rename columns for display
-                display_cols = {
-                    'bldg_num': '# Bldg', 'floor': 'Floor', 'room': 'Room',
-                    'system_type': 'System Type', 'component': 'Component', 'address': 'Address'
-                }
-                df_show = df_inv[[c for c in display_cols if c in df_inv.columns]].rename(columns=display_cols)
-                st.write(f"**{len(df_show):,}** components found (max 2,000)")
-                st.dataframe(df_show, use_container_width=True, hide_index=True, height=550)
+        # Display
+        display_cols = {'bldg_num':'Bldg #','floor':'Floor','room':'Room',
+                        'system_type':'System Type','component':'Component','address':'Address'}
+        df_show = df[[c for c in display_cols if c in df.columns]].rename(columns=display_cols)
 
-                # Summary counts
-                with st.expander("📊 Summary by Component Type"):
-                    if 'component' in df_inv.columns:
-                        comp_counts = df_inv['component'].value_counts().reset_index()
-                        comp_counts.columns = ['Component', 'Count']
-                        st.dataframe(comp_counts, use_container_width=True, hide_index=True)
-        else:
-            st.info("Select filters above or enter a search term to find components.")
-            # Show quick stats
-            if bldgs_opts:
-                st.markdown(f"**{len(bldgs_opts)}** buildings · **{len(comps_opts)}** component types · **{len(systems_opts)}** system types in inventory")
+        st.write(f"**{len(df_show):,}** components")
+        st.dataframe(df_show, use_container_width=True, hide_index=True, height=550)
+
+        if not df.empty:
+            with st.expander("📊 Summary by Component Type"):
+                comp_counts = df['component'].value_counts().reset_index()
+                comp_counts.columns = ['Component', 'Count']
+                st.dataframe(comp_counts, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PRINT REPORT

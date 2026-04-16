@@ -35,6 +35,34 @@ def get_inventory_for_building(bldg_num):
     except Exception as e:
         print("get_inventory_for_building error:", e); return []
 
+
+def get_full_inventory():
+    """Load entire sprinkler inventory once. Cached for 10 minutes.
+    The UI filters this locally — no repeated DB hits per filter change."""
+    if not _use_supabase(): return []
+    try:
+        import streamlit as st
+        @st.cache_data(ttl=600)
+        def _load():
+            sb = _sb()
+            # Supabase has a 1000-row default limit — page through all rows
+            all_rows = []
+            offset = 0
+            while True:
+                batch = (sb.table("sprinkler_inventory")
+                         .select("bldg_num,floor,room,system_type,component,address")
+                         .order("bldg_num").order("floor").order("system_type").order("component")
+                         .range(offset, offset + 999).execute().data or [])
+                all_rows.extend(batch)
+                if len(batch) < 1000:
+                    break
+                offset += 1000
+            return all_rows
+        return _load()
+    except Exception as e:
+        print("get_full_inventory error:", e)
+        return []
+
 def search_sprinkler_inventory(bldg_num=None, floor=None, system_type=None, component=None, search=None):
     if not _use_supabase(): return pd.DataFrame()
     try:
