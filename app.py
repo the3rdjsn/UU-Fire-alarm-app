@@ -2002,17 +2002,17 @@ elif page == "🔧  SP Component Inventory":
                 'system_type':'System Type','component':'Component','address':'Address'}
         df_show = df[[c for c in disp if c in df.columns]].rename(columns=disp)
         st.write(f"**{len(df_show):,}** components — click a row to view photo")
-        res_col, sum_col = st.columns([3, 1])
-        with res_col:
+
+        # Table + photo side by side
+        tbl_col, img_col = st.columns([3, 2])
+        with tbl_col:
             inv_sel = st.dataframe(df_show, use_container_width=True, hide_index=True,
                                    height=540, on_select="rerun",
                                    selection_mode="single-row", key="inv_tbl")
+        with img_col:
             inv_rows = inv_sel.get("selection",{}).get("rows",[]) if inv_sel else []
             if inv_rows and not df.empty:
                 row = df.iloc[inv_rows[0]]
-                # Look up image
-                riser_folder = bldg_map.get(str(row.get('bldg_num','')), '')
-                # Get riser_folder from master_buildings
                 _mb = dbm.get_master_building(str(row.get('bldg_num','')))
                 riser_folder = _mb.get('riser_folder','') if _mb else ''
                 img_path = dbm.get_component_image_path(
@@ -2027,19 +2027,42 @@ elif page == "🔧  SP Component Inventory":
                     st.image(img_path,
                              caption=f"{row.get('component','')} — {row.get('floor','')} {row.get('room','')}",
                              use_container_width=True)
+                    st.markdown(f"""
+                    <div style="background:#f9f9f9;border-radius:6px;padding:8px 12px;font-size:12px">
+                    <b>Building:</b> {row.get('bldg_num','')} &nbsp;·&nbsp;
+                    <b>Floor:</b> {row.get('floor','')} &nbsp;·&nbsp;
+                    <b>Room:</b> {row.get('room','')}<br>
+                    <b>System:</b> {row.get('system_type','')} &nbsp;·&nbsp;
+                    <b>Component:</b> {row.get('component','')}
+                    </div>""", unsafe_allow_html=True)
                 else:
-                    st.info(f"No photo on file for this component")
+                    st.markdown(f"""
+                    <div style="background:#f9f9f9;border-radius:6px;padding:40px 12px;
+                    text-align:center;color:#888;font-size:13px">
+                    📷 No photo on file<br>
+                    <span style="font-size:11px">{row.get('component','')} —
+                    {row.get('floor','')} {row.get('room','')}</span>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="background:#f9f9f9;border-radius:6px;padding:60px 12px;
+                text-align:center;color:#aaa;font-size:13px">
+                👆 Click a row to view component photo
+                </div>""", unsafe_allow_html=True)
 
-        with sum_col:
-            if not df.empty:
+        # Summary tables below the table
+        if not df.empty:
+            sm1, sm2 = st.columns(2)
+            with sm1:
                 st.markdown("**By Component**")
                 cc = df["component"].value_counts().reset_index()
                 cc.columns = ["Component","Count"]
-                st.dataframe(cc, use_container_width=True, hide_index=True, height=260)
+                st.dataframe(cc, use_container_width=True, hide_index=True, height=250)
+            with sm2:
                 st.markdown("**By System Type**")
                 sc = df["system_type"].value_counts().reset_index()
                 sc.columns = ["System","Count"]
-                st.dataframe(sc, use_container_width=True, hide_index=True, height=260)
+                st.dataframe(sc, use_container_width=True, hide_index=True, height=250)
 
     _inventory_tab()
 
