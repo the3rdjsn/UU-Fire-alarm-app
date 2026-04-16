@@ -226,25 +226,62 @@ with st.sidebar:
 
     NAV_OPTIONS = [
         "📊  Dashboard",
+        # Fire Alarm
+        "🔥  ─── Fire Alarm ───",
         "📅  Schedule",
         "🏢  Buildings",
         "✏️  Edit Building",
         "📋  New Inspection",
         "📁  Inspection History",
         "🔍  Device Inventory",
-        "🚿  Sprinkler",
+        # Sprinkler
+        "🚿  ─── Sprinkler ───",
+        "📅  SP Schedule",
+        "📋  SP New Inspection",
+        "📁  SP Inspection History",
+        "🔧  SP Component Inventory",
+        # Other
         "🖨️  Print Report",
     ]
 
-    # Programmatic navigation: set 'nav_target' before rerun to jump to a page
+    # Pages that are just section headers — not navigable
+    NAV_HEADERS = {
+        "🔥  ─── Fire Alarm ───",
+        "🚿  ─── Sprinkler ───",
+    }
+
+    # Programmatic navigation
     if 'nav_target' in st.session_state:
         target = st.session_state.pop('nav_target')
-        if target in NAV_OPTIONS:
+        if target in NAV_OPTIONS and target not in NAV_HEADERS:
             st.session_state['nav_radio'] = target
+
+    # Custom sidebar rendering — headers not selectable
+    st.markdown("""<style>
+    /* Style section header radio options as non-clickable labels */
+    div[data-testid="stRadio"] label:has(input[value*="───"]) {
+        pointer-events: none !important;
+        opacity: 1 !important;
+        color: #888 !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.05em !important;
+        text-transform: uppercase !important;
+        padding-top: 10px !important;
+    }
+    div[data-testid="stRadio"] label:has(input[value*="───"]) > div:first-child {
+        display: none !important;
+    }
+    </style>""", unsafe_allow_html=True)
 
     page = st.radio("Navigation", NAV_OPTIONS,
                     key='nav_radio',
                     label_visibility="collapsed")
+
+    # If a header was somehow selected, default to dashboard
+    if page in NAV_HEADERS:
+        st.session_state['nav_radio'] = "📊  Dashboard"
+        st.rerun()
 
 
 
@@ -1492,7 +1529,340 @@ elif page == "✏️  Edit Building":
 # ══════════════════════════════════════════════════════════════════════════════
 # SPRINKLER INSPECTION
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "🚿  Sprinkler":
+elif page == "📋  SP New Inspection":
+    import db_sprinkler as dbs
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>Sprinkler System Inspection</h1>
+          <p>NFPA 25 · University of Utah · Facilities Management</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+    buildings = dbs.get_sprinkler_buildings()
+    if not buildings:
+        st.warning("No sprinkler buildings found. Run the Supabase seed SQL first.")
+        st.stop()
+
+    def _bsort(b):
+        n = str(b.get('bldg_num',''))
+        try: return (0, int(float(n)))
+        except: return (1, n)
+
+    buildings = sorted(buildings, key=_bsort)
+    bldg_labels = [f"{b['bldg_num']} — {b['name']}" if b.get('name') else b['bldg_num']
+                   for b in buildings]
+
+    col_a, col_b, col_c = st.columns([2, 1, 1])
+    with col_a:
+        sel_label = st.selectbox("Building", bldg_labels, key='sp_bldg')
+    with col_b:
+        freq_opts = ['Quarterly','Semiannual','Annual','3-Year','5-Year']
+        freq = st.selectbox("Inspection Frequency", freq_opts, key='sp_freq')
+    with col_c:
+        inspector = st.text_input("Inspector", key='sp_inspector',
+                                  placeholder="Your name")
+
+    sel_bnum = sel_label.split(' — ')[0]
+
+    if st.button("🔍 Load Inspection Items", type="primary", key='sp_load'):
+        with st.spinner("Pulling components from NFPA 25..."):
+            items = dbs.get_inspection_items_for_building(sel_bnum, freq)
+        if items:
+            st.session_state['sp_items'] = items
+            st.session_state['sp_bnum'] = sel_bnum
+            st.session_state['sp_bname'] = sel_label.split(' — ',1)[-1] if ' — ' in sel_label else sel_label
+            st.session_state['sp_freq_val'] = freq
+            st.success(f"Loaded {len(items)} inspection items")
+            st.rerun()
+        else:
+            st.warning("No NFPA 25 items matched for this building/frequency. "
+                       "Check that sprinkler_inventory and nfpa25_standards are seeded.")
+
+    # ── Inspection form ───────────────────────────────────────────────────
+    if 'sp_items' in st.session_state and st.session_state.get('sp_bnum') == sel_bnum:
+        items = st.session_state['sp_items']
+
+        st.markdown(f"### {st.session_state.get('sp_bname','')} — {st.session_state.get('sp_freq_val','')} Inspection")
+        st.caption(f"{len(items)} items required by NFPA 25")
+
+        # Group by system type for easier navigation
+        systems = {}
+        for it in items:
+            sys = it.get('system_type', 'Other')
+            systems.setdefault(sys, []).append(it)
+
+        # Summary bar
+        results = [it.get('status','') for it in items]
+        n_pass = results.count('Pass')
+        n_fail = results.count('Fail')
+        n_na   = results.count('N/A')
+        n_done = n_pass + n_fail + n_na
+        st.markdown(
+            f'<div style="background:#f9f9f9;border-radius:8px;padding:10px 16px;'
+            f'border-left:3px solid #CC2929;margin-bottom:12px">'
+            f'<span style="margin-right:20px">✅ <b>{n_pass}</b> Pass</span>'
+            f'<span style="margin-right:20px;color:#991b1b">❌ <b>{n_fail}</b> Fail</span>'
+            f'<span style="margin-right:20px;color:#888">— <b>{n_na}</b> N/A</span>'
+            f'<span style="color:#555">{n_done}/{len(items)} complete</span>'
+            f'</div>', unsafe_allow_html=True)
+
+        # Quick actions
+        qa1, qa2, qa3 = st.columns(3)
+        with qa1:
+            if st.button("✅ Mark All Pass", key='sp_all_pass'):
+                for it in items: it['status'] = 'Pass'
+                st.session_state['sp_items'] = items
+                st.rerun()
+        with qa2:
+            if st.button("— Mark All N/A", key='sp_all_na'):
+                for it in items: it['status'] = 'N/A'
+                st.session_state['sp_items'] = items
+                st.rerun()
+        with qa3:
+            if st.button("🔄 Clear All", key='sp_clear'):
+                for it in items: it['status'] = ''; it['reading'] = ''; it['comments'] = ''
+                st.session_state['sp_items'] = items
+                st.rerun()
+
+        st.divider()
+
+        # Render each system as an expander
+        for sys_name, sys_items in systems.items():
+            sys_done  = sum(1 for it in sys_items if it.get('status'))
+            sys_fails = sum(1 for it in sys_items if it.get('status') == 'Fail')
+            label = f"**{sys_name}** — {sys_done}/{len(sys_items)} done"
+            if sys_fails: label += f" · ⚠️ {sys_fails} FAIL"
+
+            with st.expander(label, expanded=(sys_fails > 0)):
+                for idx, it in enumerate(items):
+                    if it.get('system_type') != sys_name: continue
+
+                    # Header row
+                    proc_color = {'Inspect':'#1e40af','Test':'#991b1b',
+                                  'Maintenance':'#854d0e'}.get(it.get('procedure',''),'#555')
+                    st.markdown(
+                        f'<div style="background:#f8f8f8;border-radius:6px;padding:8px 12px;'
+                        f'margin:6px 0;border-left:3px solid {proc_color}">'
+                        f'<span style="font-weight:700">{it["component"]}</span>'
+                        f'&nbsp;&nbsp;<span style="color:{proc_color};font-size:12px;'
+                        f'font-weight:600">{it.get("procedure","")}</span>'
+                        f'&nbsp;&nbsp;<span style="color:#888;font-size:11px">§{it.get("reference","")}</span>'
+                        f'<br><span style="font-size:12px;color:#444">{it.get("criteria","")}</span>'
+                        f'</div>', unsafe_allow_html=True)
+
+                    r1, r2, r3 = st.columns([1, 1, 3])
+                    with r1:
+                        new_status = st.selectbox(
+                            "Status", ['','Pass','Fail','N/A','Not Tested'],
+                            index=['','Pass','Fail','N/A','Not Tested'].index(it.get('status',''))
+                                  if it.get('status','') in ['','Pass','Fail','N/A','Not Tested'] else 0,
+                            key=f'sp_status_{idx}')
+                        it['status'] = new_status
+                    with r2:
+                        it['reading'] = st.text_input("Reading", value=it.get('reading',''),
+                                                       key=f'sp_read_{idx}',
+                                                       placeholder="e.g. 141/125 psi")
+                    with r3:
+                        it['comments'] = st.text_input("Comments", value=it.get('comments',''),
+                                                        key=f'sp_comm_{idx}')
+                    # Flag fail
+                    if it.get('status') == 'Fail':
+                        st.error(f"⚠️ FAIL — {it['component']} at {it.get('floor','')} {it.get('room','')}")
+
+        st.session_state['sp_items'] = items
+
+        # ── Save section ──────────────────────────────────────────────────
+        st.divider()
+        st.markdown('<div class="section-title">Save Inspection</div>', unsafe_allow_html=True)
+        sc1, sc2, sc3 = st.columns([1, 1, 2])
+        with sc1:
+            insp_date = st.date_input("Inspection Date", value=date.today(), key='sp_date')
+        with sc2:
+            n_fail_total = sum(1 for it in items if it.get('status') == 'Fail')
+            if n_fail_total > 0:
+                overall = st.selectbox("Overall Result",
+                    ["FAIL — Deficiencies Noted", "PARTIAL — Some Items Incomplete"],
+                    key='sp_result')
+            else:
+                overall = st.selectbox("Overall Result",
+                    ["PASS", "PARTIAL — Some Items Incomplete"],
+                    key='sp_result')
+        with sc3:
+            sp_notes = st.text_area("Notes", height=68, key='sp_notes',
+                                    placeholder="Overall condition, observations…")
+
+        if st.button("💾 Save Inspection Report", type="primary", key='sp_save'):
+            if not inspector:
+                st.error("Please enter inspector name before saving.")
+            else:
+                header = {
+                    'bldg_num':       sel_bnum,
+                    'bldg_name':      st.session_state.get('sp_bname',''),
+                    'freq_type':      st.session_state.get('sp_freq_val',''),
+                    'inspection_date': str(insp_date),
+                    'inspector_name': inspector,
+                    'overall_result': overall,
+                    'notes':          sp_notes,
+                }
+                save_items = [{k: it.get(k,'') for k in
+                    ['component','system_type','floor','room','reference',
+                     'frequency','procedure','criteria','status','reading','comments']}
+                    for it in items]
+                with st.spinner("Saving..."):
+                    insp_id = dbs.save_sprinkler_inspection(header, save_items)
+                if insp_id:
+                    # Update schedule status
+                    sched = dbs.get_sprinkler_schedule(
+                        month=date.today().strftime('%B'),
+                        freq_type=st.session_state.get('sp_freq_val',''))
+                    for s in sched:
+                        if str(s.get('bldg_num')) == sel_bnum:
+                            dbs.update_sprinkler_schedule_status(
+                                s['id'], 'Complete', str(insp_date))
+                    st.success(f"✅ Inspection saved (ID #{insp_id})")
+                    del st.session_state['sp_items']
+                    st.rerun()
+                else:
+                    st.error("Save failed — check Supabase connection.")
+
+
+elif page == "📅  SP Schedule":
+    import db_sprinkler as dbs
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>Sprinkler System Inspection</h1>
+          <p>NFPA 25 · University of Utah · Facilities Management</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+    MONTHS = ['All','January','February','March','April','May','June',
+              'July','August','September','October','November','December']
+    sc1, sc2, sc3 = st.columns([1, 1, 2])
+    with sc1:
+        sp_month = st.selectbox("Month", MONTHS, key='sp_sched_month')
+    with sc2:
+        sp_ft = st.selectbox("Frequency", ['All','Annual','Quarterly','5-Year'], key='sp_sched_freq')
+    with sc3:
+        sp_search = st.text_input("Search building", placeholder="Name or number…", key='sp_sched_search')
+
+    rows = dbs.get_sprinkler_schedule(
+        month=sp_month if sp_month != 'All' else None,
+        freq_type=sp_ft if sp_ft != 'All' else None)
+
+    # Join building names
+    bldg_names = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
+    for r in rows:
+        r['building_name'] = bldg_names.get(str(r['bldg_num']), '')
+
+    if sp_search:
+        q = sp_search.lower()
+        rows = [r for r in rows if q in str(r.get('bldg_num','')).lower()
+                or q in r.get('building_name','').lower()]
+
+    complete = sum(1 for r in rows if r.get('status') == 'Complete')
+    overdue  = sum(1 for r in rows if r.get('status') == 'Overdue')
+    st.write(f"**{len(rows)}** entries · ✅ {complete} complete · 🔴 {overdue} overdue")
+
+    for r in rows:
+        badge_color = {'Complete':'#166534','Overdue':'#991b1b',
+                       'Pending':'#854d0e','In Progress':'#1e40af'}.get(r.get('status',''),'#555')
+        with st.expander(
+            f"**{r['bldg_num']}** {r.get('building_name','')} · "
+            f"{r.get('freq_type','')} · {r.get('month','')} · "
+            f"[{r.get('status','')}]"):
+            ec1, ec2, ec3 = st.columns([1, 1, 1])
+            with ec1:
+                new_stat = st.selectbox("Status",
+                    ['Pending','In Progress','Complete','Overdue','Construction'],
+                    index=['Pending','In Progress','Complete','Overdue','Construction'].index(
+                        r['status'] if r.get('status') in
+                        ['Pending','In Progress','Complete','Overdue','Construction'] else 'Pending'),
+                    key=f"sp_sstat_{r['id']}")
+            with ec2:
+                done_date = st.date_input("Date Completed", value=None, key=f"sp_sdate_{r['id']}")
+            with ec3:
+                sp_snotes = st.text_input("Notes", value=r.get('notes',''), key=f"sp_snotes_{r['id']}")
+            if st.button("💾 Save", key=f"sp_ssave_{r['id']}", type="primary"):
+                dbs.update_sprinkler_schedule_status(
+                    r['id'], new_stat,
+                    done_date.isoformat() if done_date else None,
+                    sp_snotes)
+                st.success("Saved"); st.rerun()
+            if st.button("📋 Start Inspection", key=f"sp_sinsp_{r['id']}"):
+                st.session_state['sp_bldg'] = f"{r['bldg_num']} — {r.get('building_name','')}"
+                st.session_state['sp_freq_sel'] = r.get('freq_type','Annual')
+                st.rerun()
+
+
+elif page == "📁  SP Inspection History":
+    import db_sprinkler as dbs
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>Sprinkler Inspection History</h1>
+          <p>NFPA 25 · University of Utah · Facilities Management</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+    _sp_bldgs = dbs.get_sprinkler_buildings()
+    def _sp_bsort(b):
+        n = str(b.get('bldg_num',''))
+        try: return (0, int(float(n)))
+        except: return (1, n)
+    _sp_bldgs = sorted(_sp_bldgs, key=_sp_bsort)
+    bldg_labels = [f"{b['bldg_num']} — {b['name']}" if b.get('name') else b['bldg_num'] for b in _sp_bldgs]
+    freq_opts = ['Quarterly','Semiannual','Annual','3-Year','5-Year']
+    hb1, hb2 = st.columns([2, 1])
+    with hb1:
+        hist_bldg = st.selectbox("Filter by Building", ['All'] + bldg_labels, key='sp_hist_bldg')
+    with hb2:
+        hist_freq = st.selectbox("Frequency", ['All'] + freq_opts, key='sp_hist_freq')
+
+    hist_bnum = hist_bldg.split(' — ')[0] if hist_bldg != 'All' else None
+    inspections = dbs.get_sprinkler_inspections(hist_bnum)
+    if hist_freq != 'All':
+        inspections = [i for i in inspections if i.get('freq_type') == hist_freq]
+
+    if not inspections:
+        st.info("No sprinkler inspection records saved yet.")
+    else:
+        hist_df = pd.DataFrame([{
+            'Date':      i.get('inspection_date',''),
+            'Building':  f"{i.get('bldg_num','')} {i.get('bldg_name','')}",
+            'Frequency': i.get('freq_type',''),
+            'Result':    i.get('overall_result',''),
+            'Inspector': i.get('inspector_name',''),
+        } for i in inspections])
+        selected_hist = st.dataframe(hist_df, use_container_width=True,
+                                      hide_index=True, on_select="rerun",
+                                      selection_mode="single-row", key="sp_hist_tbl")
+        sel_hist_rows = selected_hist.get("selection",{}).get("rows",[]) if selected_hist else []
+        if sel_hist_rows:
+            insp = inspections[sel_hist_rows[0]]
+            st.divider()
+            st.markdown(f"### {insp.get('bldg_name','')} — {insp.get('freq_type','')} — {insp.get('inspection_date','')}")
+            st.write(f"**Inspector:** {insp.get('inspector_name','')} &nbsp;&nbsp; **Result:** {insp.get('overall_result','')}")
+            if insp.get('notes'): st.write(f"**Notes:** {insp['notes']}")
+            items = dbs.get_sprinkler_inspection_items(insp['id'])
+            if items:
+                items_df = pd.DataFrame([{
+                    'Component':   it.get('component',''),
+                    'System':      it.get('system_type',''),
+                    'Floor/Room':  f"{it.get('floor','')} {it.get('room','')}".strip(),
+                    'Procedure':   it.get('procedure',''),
+                    'Status':      it.get('status',''),
+                    'Reading':     it.get('reading',''),
+                    'Comments':    it.get('comments',''),
+                } for it in items])
+                st.dataframe(items_df, use_container_width=True, hide_index=True, height=400)
+                fails = [it for it in items if it.get('status') == 'Fail']
+                if fails:
+                    st.error(f"⚠️ {len(fails)} deficiencies found:")
+                    for f in fails:
+                        st.write(f"• **{f['component']}** ({f.get('floor','')} {f.get('room','')}) — {f.get('comments','')}")
+
+
+
+elif page == "🔧  SP Component Inventory":
     import db_sprinkler as dbs
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
@@ -1502,387 +1872,89 @@ elif page == "🚿  Sprinkler":
         </div>
     </div>''', unsafe_allow_html=True)
 
-    sp_tab1, sp_tab2, sp_tab3, sp_tab4 = st.tabs(["📋 New Inspection", "📅 Schedule", "📁 History", "🔧 Component Inventory"])
+    @st.fragment
+    def _inventory_tab():
+        st.markdown('<div class="section-title">Search Sprinkler Components</div>', unsafe_allow_html=True)
 
-    # ── TAB 1: NEW INSPECTION ─────────────────────────────────────────────────
-    with sp_tab1:
-        buildings = dbs.get_sprinkler_buildings()
-        if not buildings:
-            st.warning("No sprinkler buildings found. Run the Supabase seed SQL first.")
-            st.stop()
-
-        def _bsort(b):
-            n = str(b.get('bldg_num',''))
-            try: return (0, int(float(n)))
-            except: return (1, n)
-
-        buildings = sorted(buildings, key=_bsort)
-        bldg_labels = [f"{b['bldg_num']} — {b['name']}" if b.get('name') else b['bldg_num']
-                       for b in buildings]
-
-        col_a, col_b, col_c = st.columns([2, 1, 1])
-        with col_a:
-            sel_label = st.selectbox("Building", bldg_labels, key='sp_bldg')
-        with col_b:
-            freq_opts = ['Quarterly','Semiannual','Annual','3-Year','5-Year']
-            freq = st.selectbox("Inspection Frequency", freq_opts, key='sp_freq')
-        with col_c:
-            inspector = st.text_input("Inspector", key='sp_inspector',
-                                      placeholder="Your name")
-
-        sel_bnum = sel_label.split(' — ')[0]
-
-        if st.button("🔍 Load Inspection Items", type="primary", key='sp_load'):
-            with st.spinner("Pulling components from NFPA 25..."):
-                items = dbs.get_inspection_items_for_building(sel_bnum, freq)
-            if items:
-                st.session_state['sp_items'] = items
-                st.session_state['sp_bnum'] = sel_bnum
-                st.session_state['sp_bname'] = sel_label.split(' — ',1)[-1] if ' — ' in sel_label else sel_label
-                st.session_state['sp_freq_val'] = freq
-                st.success(f"Loaded {len(items)} inspection items")
-                st.rerun()
+        if 'sp_inv_df' not in st.session_state:
+            with st.spinner("Loading inventory (one-time)..."):
+                raw = dbs.get_full_inventory()
+            if raw:
+                st.session_state['sp_inv_df'] = pd.DataFrame(raw)
             else:
-                st.warning("No NFPA 25 items matched for this building/frequency. "
-                           "Check that sprinkler_inventory and nfpa25_standards are seeded.")
+                st.warning("No inventory data. Run seed SQL first.")
+                return
 
-        # ── Inspection form ───────────────────────────────────────────────────
-        if 'sp_items' in st.session_state and st.session_state.get('sp_bnum') == sel_bnum:
-            items = st.session_state['sp_items']
+        df_all = st.session_state['sp_inv_df']
+        bldg_map = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
 
-            st.markdown(f"### {st.session_state.get('sp_bname','')} — {st.session_state.get('sp_freq_val','')} Inspection")
-            st.caption(f"{len(items)} items required by NFPA 25")
+        def _label(n):
+            name = bldg_map.get(str(n),'')
+            return f"{n} — {name}" if name else str(n)
 
-            # Group by system type for easier navigation
-            systems = {}
-            for it in items:
-                sys = it.get('system_type', 'Other')
-                systems.setdefault(sys, []).append(it)
+        all_bldgs   = sorted(df_all['bldg_num'].dropna().unique().tolist(),
+                             key=lambda x: (0,int(float(x))) if str(x).replace('.','').isdigit() else (1,str(x)))
+        all_floors  = sorted(df_all['floor'].dropna().unique().tolist())
+        all_systems = sorted(df_all['system_type'].dropna().unique().tolist())
+        all_comps   = sorted(df_all['component'].dropna().unique().tolist())
 
-            # Summary bar
-            results = [it.get('status','') for it in items]
-            n_pass = results.count('Pass')
-            n_fail = results.count('Fail')
-            n_na   = results.count('N/A')
-            n_done = n_pass + n_fail + n_na
-            st.markdown(
-                f'<div style="background:#f9f9f9;border-radius:8px;padding:10px 16px;'
-                f'border-left:3px solid #CC2929;margin-bottom:12px">'
-                f'<span style="margin-right:20px">✅ <b>{n_pass}</b> Pass</span>'
-                f'<span style="margin-right:20px;color:#991b1b">❌ <b>{n_fail}</b> Fail</span>'
-                f'<span style="margin-right:20px;color:#888">— <b>{n_na}</b> N/A</span>'
-                f'<span style="color:#555">{n_done}/{len(items)} complete</span>'
-                f'</div>', unsafe_allow_html=True)
+        st.caption(f"{len(df_all):,} total components across {len(all_bldgs)} buildings")
 
-            # Quick actions
-            qa1, qa2, qa3 = st.columns(3)
-            with qa1:
-                if st.button("✅ Mark All Pass", key='sp_all_pass'):
-                    for it in items: it['status'] = 'Pass'
-                    st.session_state['sp_items'] = items
-                    st.rerun()
-            with qa2:
-                if st.button("— Mark All N/A", key='sp_all_na'):
-                    for it in items: it['status'] = 'N/A'
-                    st.session_state['sp_items'] = items
-                    st.rerun()
-            with qa3:
-                if st.button("🔄 Clear All", key='sp_clear'):
-                    for it in items: it['status'] = ''; it['reading'] = ''; it['comments'] = ''
-                    st.session_state['sp_items'] = items
-                    st.rerun()
+        r1c1, r1c2, r1c3 = st.columns([2, 1, 1])
+        with r1c1:
+            inv_search = st.text_input("🔍 Free-text search", placeholder="Any field…", key='inv_search')
+        with r1c2:
+            inv_bldg = st.selectbox("Building", ['All'] + [_label(n) for n in all_bldgs], key='inv_bldg')
+        with r1c3:
+            inv_floor = st.selectbox("Floor", ['All'] + all_floors, key='inv_floor')
 
-            st.divider()
+        r2c1, r2c2, r2c3 = st.columns([2, 2, 1])
+        with r2c1:
+            inv_system = st.selectbox("System Type", ['All'] + all_systems, key='inv_system')
+        with r2c2:
+            inv_comp = st.selectbox("Component", ['All'] + all_comps, key='inv_comp')
+        with r2c3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄 Reload", key='inv_reload', use_container_width=True,
+                         help="Refresh from database"):
+                del st.session_state['sp_inv_df']
+                st.rerun()
 
-            # Render each system as an expander
-            for sys_name, sys_items in systems.items():
-                sys_done  = sum(1 for it in sys_items if it.get('status'))
-                sys_fails = sum(1 for it in sys_items if it.get('status') == 'Fail')
-                label = f"**{sys_name}** — {sys_done}/{len(sys_items)} done"
-                if sys_fails: label += f" · ⚠️ {sys_fails} FAIL"
+        inv_bnum = inv_bldg.split(' — ')[0] if inv_bldg != 'All' else 'All'
+        df = df_all.copy()
+        if inv_bnum != 'All':
+            df = df[df['bldg_num'].astype(str) == str(inv_bnum)]
+        if inv_floor != 'All':
+            df = df[df['floor'] == inv_floor]
+        if inv_system != 'All':
+            df = df[df['system_type'] == inv_system]
+        if inv_comp != 'All':
+            df = df[df['component'] == inv_comp]
+        if inv_search:
+            s = inv_search.lower()
+            mask = df.apply(lambda row: any(s in str(v).lower() for v in row), axis=1)
+            df = df[mask]
 
-                with st.expander(label, expanded=(sys_fails > 0)):
-                    for idx, it in enumerate(items):
-                        if it.get('system_type') != sys_name: continue
-
-                        # Header row
-                        proc_color = {'Inspect':'#1e40af','Test':'#991b1b',
-                                      'Maintenance':'#854d0e'}.get(it.get('procedure',''),'#555')
-                        st.markdown(
-                            f'<div style="background:#f8f8f8;border-radius:6px;padding:8px 12px;'
-                            f'margin:6px 0;border-left:3px solid {proc_color}">'
-                            f'<span style="font-weight:700">{it["component"]}</span>'
-                            f'&nbsp;&nbsp;<span style="color:{proc_color};font-size:12px;'
-                            f'font-weight:600">{it.get("procedure","")}</span>'
-                            f'&nbsp;&nbsp;<span style="color:#888;font-size:11px">§{it.get("reference","")}</span>'
-                            f'<br><span style="font-size:12px;color:#444">{it.get("criteria","")}</span>'
-                            f'</div>', unsafe_allow_html=True)
-
-                        r1, r2, r3 = st.columns([1, 1, 3])
-                        with r1:
-                            new_status = st.selectbox(
-                                "Status", ['','Pass','Fail','N/A','Not Tested'],
-                                index=['','Pass','Fail','N/A','Not Tested'].index(it.get('status',''))
-                                      if it.get('status','') in ['','Pass','Fail','N/A','Not Tested'] else 0,
-                                key=f'sp_status_{idx}')
-                            it['status'] = new_status
-                        with r2:
-                            it['reading'] = st.text_input("Reading", value=it.get('reading',''),
-                                                           key=f'sp_read_{idx}',
-                                                           placeholder="e.g. 141/125 psi")
-                        with r3:
-                            it['comments'] = st.text_input("Comments", value=it.get('comments',''),
-                                                            key=f'sp_comm_{idx}')
-                        # Flag fail
-                        if it.get('status') == 'Fail':
-                            st.error(f"⚠️ FAIL — {it['component']} at {it.get('floor','')} {it.get('room','')}")
-
-            st.session_state['sp_items'] = items
-
-            # ── Save section ──────────────────────────────────────────────────
-            st.divider()
-            st.markdown('<div class="section-title">Save Inspection</div>', unsafe_allow_html=True)
-            sc1, sc2, sc3 = st.columns([1, 1, 2])
-            with sc1:
-                insp_date = st.date_input("Inspection Date", value=date.today(), key='sp_date')
-            with sc2:
-                n_fail_total = sum(1 for it in items if it.get('status') == 'Fail')
-                if n_fail_total > 0:
-                    overall = st.selectbox("Overall Result",
-                        ["FAIL — Deficiencies Noted", "PARTIAL — Some Items Incomplete"],
-                        key='sp_result')
-                else:
-                    overall = st.selectbox("Overall Result",
-                        ["PASS", "PARTIAL — Some Items Incomplete"],
-                        key='sp_result')
-            with sc3:
-                sp_notes = st.text_area("Notes", height=68, key='sp_notes',
-                                        placeholder="Overall condition, observations…")
-
-            if st.button("💾 Save Inspection Report", type="primary", key='sp_save'):
-                if not inspector:
-                    st.error("Please enter inspector name before saving.")
-                else:
-                    header = {
-                        'bldg_num':       sel_bnum,
-                        'bldg_name':      st.session_state.get('sp_bname',''),
-                        'freq_type':      st.session_state.get('sp_freq_val',''),
-                        'inspection_date': str(insp_date),
-                        'inspector_name': inspector,
-                        'overall_result': overall,
-                        'notes':          sp_notes,
-                    }
-                    save_items = [{k: it.get(k,'') for k in
-                        ['component','system_type','floor','room','reference',
-                         'frequency','procedure','criteria','status','reading','comments']}
-                        for it in items]
-                    with st.spinner("Saving..."):
-                        insp_id = dbs.save_sprinkler_inspection(header, save_items)
-                    if insp_id:
-                        # Update schedule status
-                        sched = dbs.get_sprinkler_schedule(
-                            month=date.today().strftime('%B'),
-                            freq_type=st.session_state.get('sp_freq_val',''))
-                        for s in sched:
-                            if str(s.get('bldg_num')) == sel_bnum:
-                                dbs.update_sprinkler_schedule_status(
-                                    s['id'], 'Complete', str(insp_date))
-                        st.success(f"✅ Inspection saved (ID #{insp_id})")
-                        del st.session_state['sp_items']
-                        st.rerun()
-                    else:
-                        st.error("Save failed — check Supabase connection.")
-
-    # ── TAB 2: SCHEDULE ───────────────────────────────────────────────────────
-    with sp_tab2:
-        MONTHS = ['All','January','February','March','April','May','June',
-                  'July','August','September','October','November','December']
-        sc1, sc2, sc3 = st.columns([1, 1, 2])
-        with sc1:
-            sp_month = st.selectbox("Month", MONTHS, key='sp_sched_month')
-        with sc2:
-            sp_ft = st.selectbox("Frequency", ['All','Annual','Quarterly','5-Year'], key='sp_sched_freq')
-        with sc3:
-            sp_search = st.text_input("Search building", placeholder="Name or number…", key='sp_sched_search')
-
-        rows = dbs.get_sprinkler_schedule(
-            month=sp_month if sp_month != 'All' else None,
-            freq_type=sp_ft if sp_ft != 'All' else None)
-
-        # Join building names
-        bldg_names = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
-        for r in rows:
-            r['building_name'] = bldg_names.get(str(r['bldg_num']), '')
-
-        if sp_search:
-            q = sp_search.lower()
-            rows = [r for r in rows if q in str(r.get('bldg_num','')).lower()
-                    or q in r.get('building_name','').lower()]
-
-        complete = sum(1 for r in rows if r.get('status') == 'Complete')
-        overdue  = sum(1 for r in rows if r.get('status') == 'Overdue')
-        st.write(f"**{len(rows)}** entries · ✅ {complete} complete · 🔴 {overdue} overdue")
-
-        for r in rows:
-            badge_color = {'Complete':'#166534','Overdue':'#991b1b',
-                           'Pending':'#854d0e','In Progress':'#1e40af'}.get(r.get('status',''),'#555')
-            with st.expander(
-                f"**{r['bldg_num']}** {r.get('building_name','')} · "
-                f"{r.get('freq_type','')} · {r.get('month','')} · "
-                f"[{r.get('status','')}]"):
-                ec1, ec2, ec3 = st.columns([1, 1, 1])
-                with ec1:
-                    new_stat = st.selectbox("Status",
-                        ['Pending','In Progress','Complete','Overdue','Construction'],
-                        index=['Pending','In Progress','Complete','Overdue','Construction'].index(
-                            r['status'] if r.get('status') in
-                            ['Pending','In Progress','Complete','Overdue','Construction'] else 'Pending'),
-                        key=f"sp_sstat_{r['id']}")
-                with ec2:
-                    done_date = st.date_input("Date Completed", value=None, key=f"sp_sdate_{r['id']}")
-                with ec3:
-                    sp_snotes = st.text_input("Notes", value=r.get('notes',''), key=f"sp_snotes_{r['id']}")
-                if st.button("💾 Save", key=f"sp_ssave_{r['id']}", type="primary"):
-                    dbs.update_sprinkler_schedule_status(
-                        r['id'], new_stat,
-                        done_date.isoformat() if done_date else None,
-                        sp_snotes)
-                    st.success("Saved"); st.rerun()
-                if st.button("📋 Start Inspection", key=f"sp_sinsp_{r['id']}"):
-                    st.session_state['sp_bldg'] = f"{r['bldg_num']} — {r.get('building_name','')}"
-                    st.session_state['sp_freq_sel'] = r.get('freq_type','Annual')
-                    st.rerun()
-
-    # ── TAB 3: HISTORY ────────────────────────────────────────────────────────
-    with sp_tab3:
-        hb1, hb2 = st.columns([2, 1])
-        with hb1:
-            hist_bldg = st.selectbox("Filter by Building", ['All'] + bldg_labels, key='sp_hist_bldg')
-        with hb2:
-            hist_freq = st.selectbox("Frequency", ['All'] + freq_opts, key='sp_hist_freq')
-
-        hist_bnum = hist_bldg.split(' — ')[0] if hist_bldg != 'All' else None
-        inspections = dbs.get_sprinkler_inspections(hist_bnum)
-        if hist_freq != 'All':
-            inspections = [i for i in inspections if i.get('freq_type') == hist_freq]
-
-        if not inspections:
-            st.info("No sprinkler inspection records saved yet.")
-        else:
-            hist_df = pd.DataFrame([{
-                'Date':      i.get('inspection_date',''),
-                'Building':  f"{i.get('bldg_num','')} {i.get('bldg_name','')}",
-                'Frequency': i.get('freq_type',''),
-                'Result':    i.get('overall_result',''),
-                'Inspector': i.get('inspector_name',''),
-            } for i in inspections])
-            selected_hist = st.dataframe(hist_df, use_container_width=True,
-                                          hide_index=True, on_select="rerun",
-                                          selection_mode="single-row", key="sp_hist_tbl")
-            sel_hist_rows = selected_hist.get("selection",{}).get("rows",[]) if selected_hist else []
-            if sel_hist_rows:
-                insp = inspections[sel_hist_rows[0]]
-                st.divider()
-                st.markdown(f"### {insp.get('bldg_name','')} — {insp.get('freq_type','')} — {insp.get('inspection_date','')}")
-                st.write(f"**Inspector:** {insp.get('inspector_name','')} &nbsp;&nbsp; **Result:** {insp.get('overall_result','')}")
-                if insp.get('notes'): st.write(f"**Notes:** {insp['notes']}")
-                items = dbs.get_sprinkler_inspection_items(insp['id'])
-                if items:
-                    items_df = pd.DataFrame([{
-                        'Component':   it.get('component',''),
-                        'System':      it.get('system_type',''),
-                        'Floor/Room':  f"{it.get('floor','')} {it.get('room','')}".strip(),
-                        'Procedure':   it.get('procedure',''),
-                        'Status':      it.get('status',''),
-                        'Reading':     it.get('reading',''),
-                        'Comments':    it.get('comments',''),
-                    } for it in items])
-                    st.dataframe(items_df, use_container_width=True, hide_index=True, height=400)
-                    fails = [it for it in items if it.get('status') == 'Fail']
-                    if fails:
-                        st.error(f"⚠️ {len(fails)} deficiencies found:")
-                        for f in fails:
-                            st.write(f"• **{f['component']}** ({f.get('floor','')} {f.get('room','')}) — {f.get('comments','')}")
-
-
-    # ── TAB 4: COMPONENT INVENTORY ───────────────────────────────────────────
-    with sp_tab4:
-
-        @st.fragment
-        def _inventory_tab():
-            st.markdown('<div class="section-title">Search Sprinkler Components</div>', unsafe_allow_html=True)
-
-            if 'sp_inv_df' not in st.session_state:
-                with st.spinner("Loading inventory (one-time)..."):
-                    raw = dbs.get_full_inventory()
-                if raw:
-                    st.session_state['sp_inv_df'] = pd.DataFrame(raw)
-                else:
-                    st.warning("No inventory data. Run seed SQL first.")
-                    return
-
-            df_all = st.session_state['sp_inv_df']
-            bldg_map = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
-
-            def _label(n):
-                name = bldg_map.get(str(n),'')
-                return f"{n} — {name}" if name else str(n)
-
-            all_bldgs   = sorted(df_all['bldg_num'].dropna().unique().tolist(),
-                                 key=lambda x: (0,int(float(x))) if str(x).replace('.','').isdigit() else (1,str(x)))
-            all_floors  = sorted(df_all['floor'].dropna().unique().tolist())
-            all_systems = sorted(df_all['system_type'].dropna().unique().tolist())
-            all_comps   = sorted(df_all['component'].dropna().unique().tolist())
-
-            st.caption(f"{len(df_all):,} total components across {len(all_bldgs)} buildings")
-
-            r1c1, r1c2, r1c3 = st.columns([2, 1, 1])
-            with r1c1:
-                inv_search = st.text_input("🔍 Free-text search", placeholder="Any field…", key='inv_search')
-            with r1c2:
-                inv_bldg = st.selectbox("Building", ['All'] + [_label(n) for n in all_bldgs], key='inv_bldg')
-            with r1c3:
-                inv_floor = st.selectbox("Floor", ['All'] + all_floors, key='inv_floor')
-
-            r2c1, r2c2, r2c3 = st.columns([2, 2, 1])
-            with r2c1:
-                inv_system = st.selectbox("System Type", ['All'] + all_systems, key='inv_system')
-            with r2c2:
-                inv_comp = st.selectbox("Component", ['All'] + all_comps, key='inv_comp')
-            with r2c3:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🔄 Reload", key='inv_reload', use_container_width=True,
-                             help="Refresh from database"):
-                    del st.session_state['sp_inv_df']
-                    st.rerun()
-
-            inv_bnum = inv_bldg.split(' — ')[0] if inv_bldg != 'All' else 'All'
-            df = df_all.copy()
-            if inv_bnum != 'All':
-                df = df[df['bldg_num'].astype(str) == str(inv_bnum)]
-            if inv_floor != 'All':
-                df = df[df['floor'] == inv_floor]
-            if inv_system != 'All':
-                df = df[df['system_type'] == inv_system]
-            if inv_comp != 'All':
-                df = df[df['component'] == inv_comp]
-            if inv_search:
-                s = inv_search.lower()
-                mask = df.apply(lambda row: any(s in str(v).lower() for v in row), axis=1)
-                df = df[mask]
-
-            disp = {'bldg_num':'Bldg #','floor':'Floor','room':'Room',
-                    'system_type':'System Type','component':'Component','address':'Address'}
-            df_show = df[[c for c in disp if c in df.columns]].rename(columns=disp)
-            st.write(f"**{len(df_show):,}** components")
-            st.dataframe(df_show, use_container_width=True, hide_index=True, height=550)
+        disp = {'bldg_num':'Bldg #','floor':'Floor','room':'Room',
+                'system_type':'System Type','component':'Component','address':'Address'}
+        df_show = df[[c for c in disp if c in df.columns]].rename(columns=disp)
+        st.write(f"**{len(df_show):,}** components")
+        res_col, sum_col = st.columns([3, 1])
+        with res_col:
+            st.dataframe(df_show, use_container_width=True, hide_index=True, height=580)
+        with sum_col:
             if not df.empty:
-                with st.expander("📊 Summary by Component Type"):
-                    cc = df['component'].value_counts().reset_index()
-                    cc.columns = ['Component','Count']
-                    st.dataframe(cc, use_container_width=True, hide_index=True)
+                st.markdown("**By Component**")
+                cc = df["component"].value_counts().reset_index()
+                cc.columns = ["Component","Count"]
+                st.dataframe(cc, use_container_width=True, hide_index=True, height=280)
+                st.markdown("**By System Type**")
+                sc = df["system_type"].value_counts().reset_index()
+                sc.columns = ["System","Count"]
+                st.dataframe(sc, use_container_width=True, hide_index=True, height=280)
 
-        _inventory_tab()
+    _inventory_tab()
+
 
 elif page == "🖨️  Print Report":
     rdata = st.session_state.get('print_report_data')
