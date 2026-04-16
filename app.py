@@ -583,6 +583,7 @@ if page == "🏛️  Buildings":
                         fa_rows = fa_sel.get("selection",{}).get("rows",[]) if fa_sel else []
                         if fa_rows:
                             h = fa_hist[fa_rows[0]]
+                            st.session_state['last_print_type'] = 'fa'
                             st.session_state['print_report_data'] = {
                                 'bldg': dbm.get_master_building(sel_num),
                                 'date': h.get('inspection_date',''),
@@ -597,7 +598,7 @@ if page == "🏛️  Buildings":
                             }
                             if st.button("🖨️ Print This Report", key=f"mb_fa_print_{sel_num}_{fa_rows[0]}"):
                                 st.session_state.pop('sp_print_data', None)
-                                st.session_state['nav_target'] = '🖨️  Print Report'
+                                st.session_state['nav_target'] = "🖨️  Print Report"
                                 st.rerun()
                     else:
                         st.info("No fire alarm inspections saved.")
@@ -1355,6 +1356,7 @@ elif page == "📋  New Inspection":
                 # Fall back to stored fp_res if no widget keys found (expander was closed)
                 stored_fp = {k: v for k, v in st.session_state.get(fp_results_key, {}).items() if v != '—'}
                 captured_fp = widget_fp if widget_fp else stored_fp
+                st.session_state['last_print_type'] = 'fa'
                 st.session_state['print_report_data'] = {
                     'bldg': b, 'date': str(insp_date), 'wo': work_order,
                     'type': insp_type, 'result': result, 'inspector': inspector,
@@ -1457,6 +1459,7 @@ elif page == "📁  Inspection History":
                         'Duct': insp.get('aes_duct','—'),
                         'Fire Ext': insp.get('aes_ext','—'),
                     }
+                    st.session_state['last_print_type'] = 'fa'
                     st.session_state['print_report_data'] = {
                         'bldg': b_data or {'name': insp['building_name'], 'bldg_num': insp['bldg_num'],
                                            'district': insp.get('district',''), 'address':'', 'city':'','state':'',
@@ -1768,6 +1771,7 @@ elif page == "📋  SP New Inspection":
                                 s['id'], 'Complete', str(insp_date))
                     st.success(f"✅ Inspection saved (ID #{insp_id})")
                     # Store for print
+                    st.session_state['last_print_type'] = 'sp'
                     st.session_state['sp_print_data'] = {
                         'bldg_num':   sel_bnum,
                         'bldg_name':  st.session_state.get('sp_bname',''),
@@ -1956,16 +1960,17 @@ elif page == "📁  SP Inspection History":
                     for f in fails:
                         st.write(f"• **{f['component']}** ({f.get('floor','')} {f.get('room','')}) — {f.get('comments','')}")
             if st.button("🖨️ Print This Report", key=f"sp_hist_print_{insp['id']}", type="primary"):
+                st.session_state['last_print_type'] = 'sp'
                 st.session_state['sp_print_data'] = {
-                    'bldg_num':   insp.get('bldg_num',''),
-                    'bldg_name':  insp.get('bldg_name',''),
-                    'freq_type':  insp.get('freq_type',''),
-                    'date':       insp.get('inspection_date',''),
-                    'inspector':  insp.get('inspector_name',''),
-                    'result':     insp.get('overall_result',''),
-                    'notes':      insp.get('notes',''),
-                    'items':      items if items else [],
-                    'insp_id':    insp['id'],
+                'bldg_num':   insp.get('bldg_num',''),
+                'bldg_name':  insp.get('bldg_name',''),
+                'freq_type':  insp.get('freq_type',''),
+                'date':       insp.get('inspection_date',''),
+                'inspector':  insp.get('inspector_name',''),
+                'result':     insp.get('overall_result',''),
+                'notes':      insp.get('notes',''),
+                'items':      items if items else [],
+                'insp_id':    insp['id'],
                 }
                 st.session_state.pop('print_report_data', None)
                 st.session_state['nav_target'] = '🖨️  Print Report'
@@ -2119,8 +2124,9 @@ elif page == "🖨️  Print Report":
     import db_sprinkler as dbs
 
     # ── Sprinkler inspection print ────────────────────────────────────────────
+    _last_type = st.session_state.get('last_print_type', 'fa')
     sp_pdata = st.session_state.get('sp_print_data')
-    if sp_pdata:
+    if sp_pdata and _last_type == 'sp':
         st.markdown(f'''<div class="uu-header">
             <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
             <div style="border-left:1px solid #e5e5e5;padding-left:20px">
@@ -2187,8 +2193,14 @@ elif page == "🖨️  Print Report":
         st.divider()
         pc1, pc2 = st.columns(2)
         with pc1:
-            if st.button("🖨️ Print / Save PDF", type="primary", use_container_width=True):
-                st.markdown('<script>window.print();</script>', unsafe_allow_html=True)
+            import streamlit.components.v1 as _components
+            _components.html("""
+            <button onclick="window.parent.print()" style="
+                background:#0369a1;color:white;border:none;padding:10px 20px;
+                border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;width:100%;
+                font-family:sans-serif">
+                🖨️ Print / Save PDF
+            </button>""", height=50)
         with pc2:
             if st.button("← Back to SP History", use_container_width=True):
                 del st.session_state['sp_print_data']
@@ -2424,13 +2436,14 @@ elif page == "🖨️  Print Report":
     st.divider()
     c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
-        st.markdown("""
-        <button onclick="window.print()" style="
+        import streamlit.components.v1 as _components
+        _components.html("""
+        <button onclick="window.parent.print()" style="
             background:#CC2929;color:white;border:none;padding:10px 20px;
             border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;width:100%;
             font-family:sans-serif">
             🖨️ Print / Save PDF
-        </button>""", unsafe_allow_html=True)
+        </button>""", height=50)
     with c2:
         if st.button("← Back to History", use_container_width=True):
             st.session_state['nav_target'] = '📁  Inspection History'
