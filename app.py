@@ -596,6 +596,7 @@ if page == "🏛️  Buildings":
                                 'device_results': {},
                             }
                             if st.button("🖨️ Print This Report", key=f"mb_fa_print_{sel_num}_{fa_rows[0]}"):
+                                st.session_state.pop('sp_print_data', None)
                                 st.session_state['nav_target'] = '🖨️  Print Report'
                                 st.rerun()
                     else:
@@ -1362,6 +1363,7 @@ elif page == "📋  New Inspection":
                     'notes': notes, 'pct': pct,
                     'device_results': captured_fp,
                 }
+                st.session_state.pop('sp_print_data', None)
                 st.session_state['nav_target'] = '🖨️  Print Report'
                 st.rerun()
 
@@ -1473,6 +1475,7 @@ elif page == "📁  Inspection History":
                         'pct': insp.get('pct_tested', 0),
                         'device_results': {k:v for k,v in db.get_device_results(insp['id']).items() if v != '—'},
                     }
+                    st.session_state.pop('sp_print_data', None)
                     st.session_state['nav_target'] = '🖨️  Print Report'
                     st.rerun()
             with hb2:
@@ -1567,7 +1570,9 @@ elif page == "📋  SP New Inspection":
         pc1, pc2 = st.columns([1,1])
         with pc1:
             if st.button('🖨️ Print Last Saved Report', key='sp_print_last'):
+                st.session_state.pop('print_report_data', None)
                 st.session_state['nav_target'] = '🖨️  Print Report'
+                st.rerun()
                 st.rerun()
         with pc2:
             if st.button('✕ Dismiss', key='sp_print_dismiss'):
@@ -1962,6 +1967,7 @@ elif page == "📁  SP Inspection History":
                     'items':      items if items else [],
                     'insp_id':    insp['id'],
                 }
+                st.session_state.pop('print_report_data', None)
                 st.session_state['nav_target'] = '🖨️  Print Report'
                 st.rerun()
 
@@ -2200,7 +2206,13 @@ elif page == "🖨️  Print Report":
             st.rerun()
         st.stop()
 
-    b      = rdata['bldg']
+    b      = rdata.get('bldg') or {}
+    if not b:
+        st.error("Report data missing building info. Please reload the inspection.")
+        if st.button("← Back"):
+            st.session_state['nav_target'] = '📁  Inspection History'
+            st.rerun()
+        st.stop()
     result = rdata.get('result', 'PASS')
     pct    = rdata.get('pct', 0)
     defs   = rdata.get('defs', [])
@@ -2277,7 +2289,7 @@ elif page == "🖨️  Print Report":
 
     # Building image
     bldg_img_html = ''
-    img_b64, img_ext = db.get_building_image(b.get('bldg_num',''))
+    img_b64, img_ext = dbm.get_building_image(b.get('bldg_num',''))
     if img_b64:
         bldg_img_html = '<img src="data:image/{};base64,{}" style="width:100%;max-height:200px;object-fit:cover;border-radius:6px;margin-top:10px">'.format(
             img_ext, img_b64)
