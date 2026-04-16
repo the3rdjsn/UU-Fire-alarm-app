@@ -2132,84 +2132,195 @@ elif page == "🖨️  Print Report":
     _last_type = st.session_state.get('last_print_type', 'fa')
     sp_pdata = st.session_state.get('sp_print_data')
     if sp_pdata and _last_type == 'sp':
-        st.markdown(f'''<div class="uu-header">
-            <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
-            <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-              <h1>Sprinkler Inspection Report</h1>
-              <p>NFPA 25 · University of Utah · Facilities Management</p>
-            </div>
-        </div>''', unsafe_allow_html=True)
 
-        sp_result = sp_pdata.get('result','')
-        res_bg    = '#dcfce7' if 'PASS' in sp_result else ('#fee2e2' if 'FAIL' in sp_result else '#fef9c3')
-        res_color = '#166534' if 'PASS' in sp_result else ('#991b1b' if 'FAIL' in sp_result else '#854d0e')
-
-        # Header info
-        h1, h2, h3, h4 = st.columns(4)
-        with h1: st.metric("Building", f"{sp_pdata.get('bldg_num','')} — {sp_pdata.get('bldg_name','')}")
-        with h2: st.metric("Frequency", sp_pdata.get('freq_type',''))
-        with h3: st.metric("Date", sp_pdata.get('date',''))
-        with h4: st.metric("Inspector", sp_pdata.get('inspector',''))
-
-        st.markdown(f'''<div style="background:{res_bg};border-radius:8px;padding:12px 20px;
-            margin:12px 0;border-left:4px solid {res_color}">
-            <span style="font-size:20px;font-weight:700;color:{res_color}">{sp_result}</span>
-        </div>''', unsafe_allow_html=True)
-
-        if sp_pdata.get('notes'):
-            st.info(f"**Notes:** {sp_pdata['notes']}")
-
-        # Items table
-        sp_items = sp_pdata.get('items', [])
+        # Load items if not already in pdata
+        sp_items = sp_pdata.get('items') or []
         if not sp_items and sp_pdata.get('insp_id'):
             sp_items = dbs.get_sprinkler_inspection_items(sp_pdata['insp_id'])
 
-        if sp_items:
-            sp_df = pd.DataFrame([{
-                'System':    it.get('system_type',''),
-                'Component': it.get('component',''),
-                'Location':  f"{it.get('floor','')} {it.get('room','')}".strip(),
-                'Procedure': it.get('procedure',''),
-                'Criteria':  it.get('criteria',''),
-                'Status':    it.get('status',''),
-                'Reading':   it.get('reading',''),
-                'Comments':  it.get('comments',''),
-            } for it in sp_items])
+        # Counts
+        n_pass    = sum(1 for it in sp_items if it.get('status') == 'Pass')
+        n_crit    = sum(1 for it in sp_items if it.get('status') == 'Critical')
+        n_noncrit = sum(1 for it in sp_items if it.get('status') == 'Non Critical')
+        n_imp     = sum(1 for it in sp_items if it.get('status') == 'Impairment')
+        n_na      = sum(1 for it in sp_items if it.get('status') == 'N/A')
+        n_total   = len(sp_items)
 
-            # Summary counts
-            n_pass = sum(1 for it in sp_items if it.get('status') == 'Pass')
-            n_crit = sum(1 for it in sp_items if it.get('status') == 'Critical')
-            n_noncrit = sum(1 for it in sp_items if it.get('status') == 'Non Critical')
-            n_imp  = sum(1 for it in sp_items if it.get('status') == 'Impairment')
-            n_na   = sum(1 for it in sp_items if it.get('status') == 'N/A')
-            s1,s2,s3,s4,s5,s6 = st.columns(6)
-            s1.metric("Total", len(sp_items))
-            s2.metric("Pass ✅", n_pass)
-            s3.metric("Critical 🔴", n_crit)
-            s4.metric("Non Critical 🟡", n_noncrit)
-            s5.metric("Impairment ⚠️", n_imp)
-            s6.metric("N/A", n_na)
+        sp_result  = sp_pdata.get('result','')
+        res_clean  = sp_result.split('—')[0].strip()
+        res_bg     = '#dcfce7' if 'PASS' in sp_result else ('#fee2e2' if 'FAIL' in sp_result else '#fef9c3')
+        res_color  = '#166534' if 'PASS' in sp_result else ('#991b1b' if 'FAIL' in sp_result else '#854d0e')
 
-            st.dataframe(sp_df, use_container_width=True, hide_index=True, height=500)
+        # Building info from master
+        sp_bldg = dbm.get_master_building(sp_pdata.get('bldg_num',''))
+        addr_str = ', '.join(filter(None,[sp_bldg.get('address',''), sp_bldg.get('city',''), sp_bldg.get('state','')]))
+
+        # Logo
+        logo_html = '<img src="data:image/png;base64,{}" style="height:80px;object-fit:contain">'.format(
+            LOGO_B64_PRINT if LOGO_B64_PRINT else LOGO_B64)
+
+        # Building image
+        bldg_img_html = ''
+        img_b64, img_ext = dbm.get_building_image(sp_pdata.get('bldg_num',''))
+        if img_b64:
+            bldg_img_html = '<img src="data:image/{};base64,{}" style="width:100%;max-height:180px;object-fit:cover;border-radius:6px;margin-top:10px">'.format(img_ext, img_b64)
+
+        # Items table rows grouped by system
+        from itertools import groupby
+        sp_items_sorted = sorted(sp_items, key=lambda x: (x.get('system_type',''), x.get('component','')))
+
+        def status_badge(s):
+            if s == 'Pass':         return '<span class="badge-pass">Pass</span>'
+            if s == 'Critical':     return '<span class="badge-fail">Critical</span>'
+            if s == 'Non Critical': return '<span class="badge-partial">Non Critical</span>'
+            if s == 'Impairment':   return '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700">Impairment</span>'
+            return f'<span style="background:#f3f4f6;color:#555;padding:2px 8px;border-radius:12px;font-size:11px">{s}</span>'
+
+        items_rows = ''
+        for it in sp_items_sorted:
+            loc = f"{it.get('floor','')} {it.get('room','')}".strip()
+            items_rows += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td style="font-size:10px;max-width:180px">{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+                it.get('system_type',''), it.get('component',''), loc,
+                it.get('procedure',''), it.get('criteria',''),
+                status_badge(it.get('status','')),
+                it.get('reading','') or '—',
+                it.get('comments','') or '—'
+            )
+
+        # Deficiencies
+        defects = [it for it in sp_items if it.get('status') in ('Critical','Non Critical','Impairment')]
+        if defects:
+            def_rows = ''
+            for d in defects:
+                loc = f"{d.get('floor','')} {d.get('room','')}".strip()
+                def_rows += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+                    d.get('system_type',''), d.get('component',''), loc,
+                    status_badge(d.get('status','')), d.get('reading','') or '—', d.get('comments','') or '—')
+            def_html = ('<table class="rpt-table"><thead><tr>'
+                        '<th>System</th><th>Component</th><th>Location</th>'
+                        '<th>Status</th><th>Reading</th><th>Comments</th>'
+                        '</tr></thead><tbody>' + def_rows + '</tbody></table>')
+        else:
+            def_html = '<p style="color:#888;font-style:italic;font-size:12px">No deficiencies recorded.</p>'
+
+        # Print CSS
+        st.markdown("""
+        <style>
+        @media print {
+            [data-testid="stSidebar"],[data-testid="stHeader"],
+            [data-testid="stToolbar"],[data-testid="stBottom"],
+            .stButton, footer, .no-print { display: none !important; }
+            .block-container { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
+            body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+        .print-page { font-family: Arial, sans-serif; max-width: 960px; margin: 0 auto; }
+        .rpt-header { border-bottom: 3px solid #0369a1; padding: 16px 0; margin-bottom: 20px;
+                      display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        .rpt-section { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+        .rpt-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+                             color: #0369a1; border-bottom: 1px solid #e5e7eb; padding-bottom: 7px; margin-bottom: 11px; }
+        .rpt-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .rpt-field { padding: 8px 10px; background: #f9f9f9; border-radius: 6px; border-left: 3px solid #0369a1; }
+        .rpt-label { font-size: 10px; color: #888; text-transform: uppercase; font-weight: 600; }
+        .rpt-val   { font-size: 13px; color: #111; font-weight: 600; margin-top: 2px; }
+        .rpt-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .rpt-table th { background: #0369a1; color: white; padding: 7px 10px; text-align: left; }
+        .rpt-table td { padding: 5px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+        .rpt-table tr:nth-child(even) td { background: #f9f9f9; }
+        .badge-pass    { background:#dcfce7; color:#166534; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700; }
+        .badge-fail    { background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700; }
+        .badge-partial { background:#fef9c3; color:#854d0e; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700; }
+        .result-badge  { font-size: 20px; font-weight: 900; padding: 10px 20px; border-radius: 8px; }
+        .sig-line { border-bottom: 1px solid #333; height: 32px; margin-bottom: 4px; }
+        .sp-summary { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin:12px 0; }
+        .sp-stat { text-align:center; padding:10px 4px; border-radius:8px; border:1px solid #e5e7eb; }
+        .sp-stat-num { font-size:22px; font-weight:800; }
+        .sp-stat-lbl { font-size:10px; color:#888; text-transform:uppercase; font-weight:600; margin-top:2px; }
+        </style>""", unsafe_allow_html=True)
+
+        # Assemble HTML report
+        html_parts = [
+            '<div class="print-page">',
+
+            # Header
+            '<div class="rpt-header">',
+            logo_html,
+            '<div style="flex:1;padding-left:20px;border-left:1px solid #e5e5e5">',
+            '<div style="font-size:20px;font-weight:800;color:#1a1a1a">Sprinkler System Inspection Report</div>',
+            '<div style="font-size:11px;color:#888;margin-top:4px">NFPA 25 &nbsp;·&nbsp; University of Utah &nbsp;·&nbsp; Facilities Management</div>',
+            '</div>',
+            '<div class="result-badge" style="background:{};color:{}">'.format(res_bg, res_color),
+            res_clean, '</div></div>',
+
+            # Building info
+            '<div class="rpt-section">',
+            '<div class="rpt-section-title">Building Information</div>',
+            '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">',
+            '<div class="rpt-grid">',
+            '<div class="rpt-field"><div class="rpt-label">Building Name</div><div class="rpt-val">{}</div></div>'.format(sp_pdata.get('bldg_name','—')),
+            '<div class="rpt-field"><div class="rpt-label">Building #</div><div class="rpt-val">{}</div></div>'.format(sp_pdata.get('bldg_num','—')),
+            '<div class="rpt-field"><div class="rpt-label">Address</div><div class="rpt-val">{}</div></div>'.format(addr_str or '—'),
+            '<div class="rpt-field"><div class="rpt-label">District</div><div class="rpt-val">{}</div></div>'.format(sp_bldg.get('district','—')),
+            '<div class="rpt-field"><div class="rpt-label">Inspection Date</div><div class="rpt-val">{}</div></div>'.format(sp_pdata.get('date','—')),
+            '<div class="rpt-field"><div class="rpt-label">Frequency</div><div class="rpt-val">{}</div></div>'.format(sp_pdata.get('freq_type','—')),
+            '<div class="rpt-field"><div class="rpt-label">Inspector</div><div class="rpt-val">{}</div></div>'.format(sp_pdata.get('inspector','—')),
+            '<div class="rpt-field"><div class="rpt-label">AIM Asset #</div><div class="rpt-val">{}</div></div>'.format(sp_bldg.get('aim_asset','—')),
+            '</div>',
+            '<div>' + bldg_img_html + '</div>',
+            '</div></div>',
+
+            # Summary
+            '<div class="rpt-section">',
+            '<div class="rpt-section-title">Inspection Summary</div>',
+            '<div class="sp-summary">',
+            '<div class="sp-stat"><div class="sp-stat-num">{}</div><div class="sp-stat-lbl">Total</div></div>'.format(n_total),
+            '<div class="sp-stat" style="border-color:#166534"><div class="sp-stat-num" style="color:#166534">{}</div><div class="sp-stat-lbl">Pass</div></div>'.format(n_pass),
+            '<div class="sp-stat" style="border-color:#991b1b"><div class="sp-stat-num" style="color:#991b1b">{}</div><div class="sp-stat-lbl">Critical</div></div>'.format(n_crit),
+            '<div class="sp-stat" style="border-color:#854d0e"><div class="sp-stat-num" style="color:#854d0e">{}</div><div class="sp-stat-lbl">Non Critical</div></div>'.format(n_noncrit),
+            '<div class="sp-stat" style="border-color:#92400e"><div class="sp-stat-num" style="color:#92400e">{}</div><div class="sp-stat-lbl">Impairment</div></div>'.format(n_imp),
+            '<div class="sp-stat"><div class="sp-stat-num" style="color:#888">{}</div><div class="sp-stat-lbl">N/A</div></div>'.format(n_na),
+            '</div>',
+            ('<div style="background:#f9f9f9;padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px"><b>Notes:</b> {}</div>'.format(sp_pdata.get('notes','')) if sp_pdata.get('notes') else ''),
+            '</div>',
 
             # Deficiencies
-            fails = [it for it in sp_items if it.get('status') in ('Critical','Non Critical','Impairment')]
-            if fails:
-                st.markdown("### ⚠️ Deficiencies")
-                for f in fails:
-                    st.markdown(f"- **{f.get('component','')}** — {f.get('floor','')} {f.get('room','')} ({f.get('system_type','')}) — {f.get('comments','')}")
+            '<div class="rpt-section">',
+            '<div class="rpt-section-title">⚠️ Deficiencies & Non-Conformances</div>',
+            def_html,
+            '</div>',
 
+            # Full items table
+            '<div class="rpt-section">',
+            '<div class="rpt-section-title">Inspection Items</div>',
+            '<table class="rpt-table"><thead><tr>',
+            '<th>System</th><th>Component</th><th>Location</th><th>Procedure</th>',
+            '<th>Criteria</th><th>Status</th><th>Reading</th><th>Comments</th>',
+            '</tr></thead><tbody>', items_rows, '</tbody></table>',
+            '</div>',
+
+            # Signature
+            '<div class="rpt-section">',
+            '<div class="rpt-section-title">Certification</div>',
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:8px">',
+            '<div><div class="rpt-label">Inspector Signature</div><div class="sig-line"></div><div style="font-size:11px;color:#888">{}</div></div>'.format(sp_pdata.get('inspector','—')),
+            '<div><div class="rpt-label">Date</div><div class="sig-line"></div><div style="font-size:11px;color:#888">{}</div></div>'.format(sp_pdata.get('date','—')),
+            '<div><div class="rpt-label">Reviewed By</div><div class="sig-line"></div><div style="font-size:11px;color:#888">&nbsp;</div></div>',
+            '</div></div>',
+
+            '</div>',  # end print-page
+        ]
+
+        st.markdown(''.join(html_parts), unsafe_allow_html=True)
+
+        # Buttons
         st.divider()
         pc1, pc2 = st.columns(2)
         with pc1:
             import streamlit.components.v1 as _components
-            _components.html("""
-            <button onclick="window.parent.print()" style="
+            _components.html("""<button onclick="window.parent.print()" style="
                 background:#0369a1;color:white;border:none;padding:10px 20px;
-                border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;width:100%;
-                font-family:sans-serif">
-                🖨️ Print / Save PDF
-            </button>""", height=50)
+                border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;
+                width:100%;font-family:sans-serif">🖨️ Print / Save PDF</button>""", height=50)
         with pc2:
             if st.button("← Back to SP History", use_container_width=True):
                 del st.session_state['sp_print_data']
