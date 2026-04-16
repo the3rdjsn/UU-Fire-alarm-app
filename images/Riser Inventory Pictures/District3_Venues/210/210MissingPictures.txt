@@ -1,0 +1,6 @@
+Missing Pictures:
+210 Floor1 Storage Waterflow L1M001 (blurry)
+210 Floor1 Storage CheckValveFDC (blurry)
+210 Roof Stairwell ControlValve (on fire alarm map)
+210 Basement Mechanical BallDripFDC
+210 Floor1 Storage BallDripFDC
