@@ -1559,6 +1559,22 @@ elif page == "📋  SP New Inspection":
 
     sel_bnum = sel_label.split(' — ')[0]
 
+
+    # Show print button if last inspection was just saved
+    if 'sp_print_data' in st.session_state:
+        _pd = st.session_state['sp_print_data']
+        st.success(f"✅ Last saved: {_pd.get('bldg_name','')} — {_pd.get('freq_type','')} — {_pd.get('date','')}")
+        pc1, pc2 = st.columns([1,1])
+        with pc1:
+            if st.button('🖨️ Print Last Saved Report', key='sp_print_last'):
+                st.session_state['nav_target'] = '🖨️  Print Report'
+                st.rerun()
+        with pc2:
+            if st.button('✕ Dismiss', key='sp_print_dismiss'):
+                del st.session_state['sp_print_data']
+                st.rerun()
+        st.divider()
+
     if st.button("🔍 Load Inspection Items", type="primary", key='sp_load'):
         with st.spinner("Pulling components from NFPA 25..."):
             items = dbs.get_inspection_items_for_building(sel_bnum, freq)
@@ -1746,6 +1762,18 @@ elif page == "📋  SP New Inspection":
                             dbs.update_sprinkler_schedule_status(
                                 s['id'], 'Complete', str(insp_date))
                     st.success(f"✅ Inspection saved (ID #{insp_id})")
+                    # Store for print
+                    st.session_state['sp_print_data'] = {
+                        'bldg_num':   sel_bnum,
+                        'bldg_name':  st.session_state.get('sp_bname',''),
+                        'freq_type':  st.session_state.get('sp_freq_val',''),
+                        'date':       str(insp_date),
+                        'inspector':  inspector,
+                        'result':     overall,
+                        'notes':      sp_notes,
+                        'items':      save_items,
+                        'insp_id':    insp_id,
+                    }
                     del st.session_state['sp_items']
                     st.rerun()
                 else:
@@ -1922,6 +1950,20 @@ elif page == "📁  SP Inspection History":
                     st.error(f"⚠️ {len(fails)} deficiencies found:")
                     for f in fails:
                         st.write(f"• **{f['component']}** ({f.get('floor','')} {f.get('room','')}) — {f.get('comments','')}")
+            if st.button("🖨️ Print This Report", key=f"sp_hist_print_{insp['id']}", type="primary"):
+                st.session_state['sp_print_data'] = {
+                    'bldg_num':   insp.get('bldg_num',''),
+                    'bldg_name':  insp.get('bldg_name',''),
+                    'freq_type':  insp.get('freq_type',''),
+                    'date':       insp.get('inspection_date',''),
+                    'inspector':  insp.get('inspector_name',''),
+                    'result':     insp.get('overall_result',''),
+                    'notes':      insp.get('notes',''),
+                    'items':      items if items else [],
+                    'insp_id':    insp['id'],
+                }
+                st.session_state['nav_target'] = '🖨️  Print Report'
+                st.rerun()
 
 
 
@@ -2068,6 +2110,87 @@ elif page == "🔧  SP Component Inventory":
 
 
 elif page == "🖨️  Print Report":
+    import db_sprinkler as dbs
+
+    # ── Sprinkler inspection print ────────────────────────────────────────────
+    sp_pdata = st.session_state.get('sp_print_data')
+    if sp_pdata:
+        st.markdown(f'''<div class="uu-header">
+            <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+            <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+              <h1>Sprinkler Inspection Report</h1>
+              <p>NFPA 25 · University of Utah · Facilities Management</p>
+            </div>
+        </div>''', unsafe_allow_html=True)
+
+        sp_result = sp_pdata.get('result','')
+        res_bg    = '#dcfce7' if 'PASS' in sp_result else ('#fee2e2' if 'FAIL' in sp_result else '#fef9c3')
+        res_color = '#166534' if 'PASS' in sp_result else ('#991b1b' if 'FAIL' in sp_result else '#854d0e')
+
+        # Header info
+        h1, h2, h3, h4 = st.columns(4)
+        with h1: st.metric("Building", f"{sp_pdata.get('bldg_num','')} — {sp_pdata.get('bldg_name','')}")
+        with h2: st.metric("Frequency", sp_pdata.get('freq_type',''))
+        with h3: st.metric("Date", sp_pdata.get('date',''))
+        with h4: st.metric("Inspector", sp_pdata.get('inspector',''))
+
+        st.markdown(f'''<div style="background:{res_bg};border-radius:8px;padding:12px 20px;
+            margin:12px 0;border-left:4px solid {res_color}">
+            <span style="font-size:20px;font-weight:700;color:{res_color}">{sp_result}</span>
+        </div>''', unsafe_allow_html=True)
+
+        if sp_pdata.get('notes'):
+            st.info(f"**Notes:** {sp_pdata['notes']}")
+
+        # Items table
+        sp_items = sp_pdata.get('items', [])
+        if not sp_items and sp_pdata.get('insp_id'):
+            sp_items = dbs.get_sprinkler_inspection_items(sp_pdata['insp_id'])
+
+        if sp_items:
+            sp_df = pd.DataFrame([{
+                'System':    it.get('system_type',''),
+                'Component': it.get('component',''),
+                'Location':  f"{it.get('floor','')} {it.get('room','')}".strip(),
+                'Procedure': it.get('procedure',''),
+                'Criteria':  it.get('criteria',''),
+                'Status':    it.get('status',''),
+                'Reading':   it.get('reading',''),
+                'Comments':  it.get('comments',''),
+            } for it in sp_items])
+
+            # Summary counts
+            n_pass = sum(1 for it in sp_items if it.get('status') == 'Pass')
+            n_fail = sum(1 for it in sp_items if it.get('status') == 'Fail')
+            n_na   = sum(1 for it in sp_items if it.get('status') == 'N/A')
+            s1,s2,s3,s4 = st.columns(4)
+            s1.metric("Total Items", len(sp_items))
+            s2.metric("Pass ✅", n_pass)
+            s3.metric("Fail ❌", n_fail)
+            s4.metric("N/A", n_na)
+
+            st.dataframe(sp_df, use_container_width=True, hide_index=True, height=500)
+
+            # Deficiencies
+            fails = [it for it in sp_items if it.get('status') == 'Fail']
+            if fails:
+                st.markdown("### ⚠️ Deficiencies")
+                for f in fails:
+                    st.markdown(f"- **{f.get('component','')}** — {f.get('floor','')} {f.get('room','')} ({f.get('system_type','')}) — {f.get('comments','')}")
+
+        st.divider()
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            if st.button("🖨️ Print / Save PDF", type="primary", use_container_width=True):
+                st.markdown('<script>window.print();</script>', unsafe_allow_html=True)
+        with pc2:
+            if st.button("← Back to SP History", use_container_width=True):
+                del st.session_state['sp_print_data']
+                st.session_state['nav_target'] = '📁  SP Inspection History'
+                st.rerun()
+        st.stop()
+
+    # ── Fire Alarm inspection print ───────────────────────────────────────────
     rdata = st.session_state.get('print_report_data')
 
     if not rdata:
