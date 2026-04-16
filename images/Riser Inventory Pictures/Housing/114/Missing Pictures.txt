@@ -1,0 +1,4 @@
+Missing Pictures:
+114 Floor1 EastCenterStair WetSystem-0 MainDrainValve
+114 Floor2 NorthwestStair WetSystem-0
+114 Floor1 NorthwestStair WetSystem-0 MainDrainDischarge
