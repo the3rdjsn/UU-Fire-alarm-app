@@ -1612,17 +1612,21 @@ elif page == "📋  SP New Inspection":
 
         # Summary bar
         results = [it.get('status','') for it in items]
-        n_pass = results.count('Pass')
-        n_fail = results.count('Fail')
-        n_na   = results.count('N/A')
-        n_done = n_pass + n_fail + n_na
+        n_pass    = results.count('Pass')
+        n_crit    = results.count('Critical')
+        n_noncrit = results.count('Non Critical')
+        n_imp     = results.count('Impairment')
+        n_na      = results.count('N/A')
+        n_done    = n_pass + n_crit + n_noncrit + n_imp + n_na
         st.markdown(
             f'<div style="background:#f9f9f9;border-radius:8px;padding:10px 16px;'
             f'border-left:3px solid #CC2929;margin-bottom:12px">'
-            f'<span style="margin-right:20px">✅ <b>{n_pass}</b> Pass</span>'
-            f'<span style="margin-right:20px;color:#991b1b">❌ <b>{n_fail}</b> Fail</span>'
-            f'<span style="margin-right:20px;color:#888">— <b>{n_na}</b> N/A</span>'
-            f'<span style="color:#555">{n_done}/{len(items)} complete</span>'
+            f'✅ <b>{n_pass}</b> Pass &nbsp;&nbsp;'
+            f'🔴 <b>{n_crit}</b> Critical &nbsp;&nbsp;'
+            f'🟡 <b>{n_noncrit}</b> Non Critical &nbsp;&nbsp;'
+            f'⚠️ <b>{n_imp}</b> Impairment &nbsp;&nbsp;'
+            f'— <b>{n_na}</b> N/A &nbsp;&nbsp;'
+            f'{n_done}/{len(items)} complete'
             f'</div>', unsafe_allow_html=True)
 
         # Quick actions — global
@@ -1633,8 +1637,8 @@ elif page == "📋  SP New Inspection":
                 for it in items: it['status'] = 'Pass'
                 st.session_state['sp_items'] = items; st.rerun()
         with qa2:
-            if st.button("❌ All Fail", key='sp_all_fail'):
-                for it in items: it['status'] = 'Fail'
+            if st.button("🔴 All Critical", key='sp_all_crit'):
+                for it in items: it['status'] = 'Critical'
                 st.session_state['sp_items'] = items; st.rerun()
         with qa3:
             if st.button("— All N/A", key='sp_all_na'):
@@ -1663,9 +1667,9 @@ elif page == "📋  SP New Inspection":
                             if it.get('system_type') == sys_name: it['status'] = 'Pass'
                         st.session_state['sp_items'] = items; st.rerun()
                 with sm2:
-                    if st.button("❌ Fail All", key=f'sp_sys_fail_{sys_name}'):
+                    if st.button("🔴 Critical All", key=f'sp_sys_crit_{sys_name}'):
                         for it in items:
-                            if it.get('system_type') == sys_name: it['status'] = 'Fail'
+                            if it.get('system_type') == sys_name: it['status'] = 'Critical'
                         st.session_state['sp_items'] = items; st.rerun()
                 with sm3:
                     if st.button("— N/A All", key=f'sp_sys_na_{sys_name}'):
@@ -1697,9 +1701,9 @@ elif page == "📋  SP New Inspection":
                     r1, r2, r3 = st.columns([1, 1, 3])
                     with r1:
                         new_status = st.selectbox(
-                            "Status", ['','Pass','Fail','N/A','Not Tested'],
-                            index=['','Pass','Fail','N/A','Not Tested'].index(it.get('status',''))
-                                  if it.get('status','') in ['','Pass','Fail','N/A','Not Tested'] else 0,
+                            "Status", ['','Pass','Critical','Non Critical','N/A','Impairment','Not Tested'],
+                            index=['','Pass','Critical','Non Critical','N/A','Impairment','Not Tested'].index(it.get('status',''))
+                                  if it.get('status','') in ['','Pass','Critical','Non Critical','N/A','Impairment','Not Tested'] else 0,
                             key=f'sp_status_{idx}')
                         it['status'] = new_status
                     with r2:
@@ -1710,8 +1714,8 @@ elif page == "📋  SP New Inspection":
                         it['comments'] = st.text_input("Comments", value=it.get('comments',''),
                                                         key=f'sp_comm_{idx}')
                     # Flag fail
-                    if it.get('status') == 'Fail':
-                        st.error(f"⚠️ FAIL — {it['component']} at {it.get('floor','')} {it.get('room','')}")
+                    if it.get('status') in ('Critical','Impairment'):
+                        st.error(f"⚠️ {it.get('status','').upper()} — {it['component']} at {it.get('floor','')} {it.get('room','')}")
 
         st.session_state['sp_items'] = items
 
@@ -1722,21 +1726,22 @@ elif page == "📋  SP New Inspection":
         with sc1:
             insp_date = st.date_input("Inspection Date", value=date.today(), key='sp_date')
         with sc2:
-            n_fail_total  = sum(1 for it in items if it.get('status') == 'Fail')
-            n_done_total  = sum(1 for it in items if it.get('status') in ('Pass','Fail','N/A'))
-            fail_pct      = (n_fail_total / n_done_total * 100) if n_done_total else 0
-            if fail_pct > 50:
-                _auto_result = "FAIL — Deficiencies Noted"
-                _result_opts = ["FAIL — Deficiencies Noted", "PARTIAL — Some Items Incomplete", "PASS"]
-            elif n_fail_total > 0:
-                _auto_result = "PARTIAL — Some Items Incomplete"
-                _result_opts = ["PARTIAL — Some Items Incomplete", "FAIL — Deficiencies Noted", "PASS"]
+            n_crit_total  = sum(1 for it in items if it.get('status') in ('Critical','Impairment'))
+            n_noncrit     = sum(1 for it in items if it.get('status') == 'Non Critical')
+            n_done_total  = sum(1 for it in items if it.get('status') in ('Pass','Critical','Non Critical','N/A','Impairment'))
+            crit_pct      = (n_crit_total / n_done_total * 100) if n_done_total else 0
+            if crit_pct > 50:
+                _auto_result = "FAIL — Critical Deficiencies"
+                _result_opts = ["FAIL — Critical Deficiencies", "PARTIAL — Deficiencies Noted", "PASS"]
+            elif n_crit_total > 0 or n_noncrit > 0:
+                _auto_result = "PARTIAL — Deficiencies Noted"
+                _result_opts = ["PARTIAL — Deficiencies Noted", "FAIL — Critical Deficiencies", "PASS"]
             else:
                 _auto_result = "PASS"
-                _result_opts = ["PASS", "PARTIAL — Some Items Incomplete", "FAIL — Deficiencies Noted"]
+                _result_opts = ["PASS", "PARTIAL — Deficiencies Noted", "FAIL — Critical Deficiencies"]
             overall = st.selectbox("Overall Result", _result_opts, key='sp_result')
             if n_done_total > 0:
-                st.caption(f"{n_fail_total}/{n_done_total} items failed ({fail_pct:.0f}%) — auto-suggest: {_auto_result}")
+                st.caption(f"{n_crit_total} Critical · {n_noncrit} Non Critical out of {n_done_total} items — auto-suggest: {_auto_result}")
         with sc3:
             sp_notes = st.text_area("Notes", height=68, key='sp_notes',
                                     placeholder="Overall condition, observations…")
@@ -1954,7 +1959,7 @@ elif page == "📁  SP Inspection History":
                     'Comments':    it.get('comments',''),
                 } for it in items])
                 st.dataframe(items_df, use_container_width=True, hide_index=True, height=400)
-                fails = [it for it in items if it.get('status') == 'Fail']
+                fails = [it for it in items if it.get('status') in ('Critical','Non Critical','Impairment')]
                 if fails:
                     st.error(f"⚠️ {len(fails)} deficiencies found:")
                     for f in fails:
@@ -2173,18 +2178,22 @@ elif page == "🖨️  Print Report":
 
             # Summary counts
             n_pass = sum(1 for it in sp_items if it.get('status') == 'Pass')
-            n_fail = sum(1 for it in sp_items if it.get('status') == 'Fail')
+            n_crit = sum(1 for it in sp_items if it.get('status') == 'Critical')
+            n_noncrit = sum(1 for it in sp_items if it.get('status') == 'Non Critical')
+            n_imp  = sum(1 for it in sp_items if it.get('status') == 'Impairment')
             n_na   = sum(1 for it in sp_items if it.get('status') == 'N/A')
-            s1,s2,s3,s4 = st.columns(4)
-            s1.metric("Total Items", len(sp_items))
+            s1,s2,s3,s4,s5,s6 = st.columns(6)
+            s1.metric("Total", len(sp_items))
             s2.metric("Pass ✅", n_pass)
-            s3.metric("Fail ❌", n_fail)
-            s4.metric("N/A", n_na)
+            s3.metric("Critical 🔴", n_crit)
+            s4.metric("Non Critical 🟡", n_noncrit)
+            s5.metric("Impairment ⚠️", n_imp)
+            s6.metric("N/A", n_na)
 
             st.dataframe(sp_df, use_container_width=True, hide_index=True, height=500)
 
             # Deficiencies
-            fails = [it for it in sp_items if it.get('status') == 'Fail']
+            fails = [it for it in sp_items if it.get('status') in ('Critical','Non Critical','Impairment')]
             if fails:
                 st.markdown("### ⚠️ Deficiencies")
                 for f in fails:
