@@ -120,5 +120,7 @@ def building_label(b):
 
 def get_sp_components(b):
     """Return dict of non-zero sprinkler component counts for a building."""
-    return {c: int(b.get(f'sp_{c}') or 0) for c in SP_COMPONENTS
-            if int(b.get(f'sp_{c}') or 0) > 0}
+    import re as _re
+    def _safe(name): return 'sp_' + _re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    return {c: int(b.get(_safe(c)) or 0) for c in SP_COMPONENTS
+            if int(b.get(_safe(c)) or 0) > 0}

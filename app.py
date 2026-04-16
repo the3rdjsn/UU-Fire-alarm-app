@@ -222,8 +222,7 @@ with st.sidebar:
         st.image(LOGO_PATH, use_container_width=True)
     else:
         st.markdown("**DEPARTMENT OF FIRE SYSTEMS**")
-    st.caption("Solving Problems You Didn't Know You Had in Ways you wouldn't understand " \
-    "· Since 2014")
+    st.markdown("""<div style="font-size:11px;font-weight:700;text-align:center;color:#aaa;line-height:1.4;padding:2px 4px">Solving Problems, You Didn't Know You Had<br>in Ways You Wouldn't Understand<br><span style="font-weight:400">Since 2014</span></div>""", unsafe_allow_html=True)
     st.divider()
 
     NAV_OPTIONS = [
@@ -242,7 +241,8 @@ with st.sidebar:
         "📋  SP New Inspection",
         "📁  SP Inspection History",
         "🔧  SP Component Inventory",
-        # Other
+        # Print
+        "🖨️  ─── Print ───",
         "🖨️  Print Report",
     ]
 
@@ -250,6 +250,7 @@ with st.sidebar:
     NAV_HEADERS = {
         "🔥  ─── Fire Alarm ───",
         "🚿  ─── Sprinkler ───",
+        "🖨️  ─── Print ───",
     }
 
     # Programmatic navigation
@@ -515,7 +516,27 @@ if page == "🏛️  Buildings":
                             'Result':    h.get('result',''),
                             'Inspector': h.get('inspector_name',''),
                         } for h in fa_hist])
-                        st.dataframe(fa_df, use_container_width=True, hide_index=True)
+                        fa_sel = st.dataframe(fa_df, use_container_width=True, hide_index=True,
+                                              on_select="rerun", selection_mode="single-row",
+                                              key=f"mb_fa_hist_{sel_num}")
+                        fa_rows = fa_sel.get("selection",{}).get("rows",[]) if fa_sel else []
+                        if fa_rows:
+                            h = fa_hist[fa_rows[0]]
+                            st.session_state['print_report_data'] = {
+                                'bldg': dbm.get_master_building(sel_num),
+                                'date': h.get('inspection_date',''),
+                                'wo': h.get('work_order',''),
+                                'type': h.get('inspection_type',''),
+                                'result': h.get('result',''),
+                                'inspector': h.get('inspector_name',''),
+                                'aes': {}, 'dev_tested': {},
+                                'defs': h.get('deficiencies',[]) if isinstance(h.get('deficiencies'), list) else [],
+                                'notes': h.get('notes',''), 'pct': h.get('pct_tested',0),
+                                'device_results': {},
+                            }
+                            if st.button("🖨️ Print This Report", key=f"mb_fa_print_{sel_num}_{fa_rows[0]}"):
+                                st.session_state['nav_target'] = '🖨️  Print Report'
+                                st.rerun()
                     else:
                         st.info("No fire alarm inspections saved.")
 
@@ -527,7 +548,22 @@ if page == "🏛️  Buildings":
                             'Result':    h.get('overall_result',''),
                             'Inspector': h.get('inspector_name',''),
                         } for h in sp_hist])
-                        st.dataframe(sp_df, use_container_width=True, hide_index=True)
+                        sp_sel = st.dataframe(sp_df, use_container_width=True, hide_index=True,
+                                              on_select="rerun", selection_mode="single-row",
+                                              key=f"mb_sp_hist_{sel_num}")
+                        sp_rows = sp_sel.get("selection",{}).get("rows",[]) if sp_sel else []
+                        if sp_rows:
+                            h = sp_hist[sp_rows[0]]
+                            sp_items_hist = dbs.get_sprinkler_inspection_items(h['id'])
+                            if sp_items_hist:
+                                sp_items_df = pd.DataFrame([{
+                                    'Component': i.get('component',''),
+                                    'System':    i.get('system_type',''),
+                                    'Status':    i.get('status',''),
+                                    'Reading':   i.get('reading',''),
+                                    'Comments':  i.get('comments',''),
+                                } for i in sp_items_hist])
+                                st.dataframe(sp_items_df, use_container_width=True, hide_index=True)
                     else:
                         st.info("No sprinkler inspections saved.")
 
@@ -598,7 +634,7 @@ if page == "📊  Dashboard":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>Fire Alarm Management Dashboard</h1>
+          <h1>Fire Systems Dashboard</h1>
           <p>University of Utah · Facilities Management · 2026 Inspection Program</p>
         </div>
     </div>''', unsafe_allow_html=True)
@@ -608,7 +644,8 @@ if page == "📊  Dashboard":
     scheduled = stats.get("scheduled", 0)
     done_pct = round(done / scheduled * 100) if scheduled else 0
 
-    # Metric cards — clickable
+    # Fire Alarm cards
+    st.markdown('<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:#CC2929;text-transform:uppercase;margin-bottom:4px;border-bottom:2px solid #CC2929;padding-bottom:4px">🔥 FIRE ALARM SYSTEMS (NFPA 72)</div>', unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         st.markdown(f"""<div class="metric-card" style="--accent:#CC2929">
@@ -617,7 +654,7 @@ if page == "📊  Dashboard":
             <div class="sub">Buildings monitored</div>
         </div>""", unsafe_allow_html=True)
         if st.button("→ Buildings", key='card_buildings', use_container_width=True):
-            st.session_state['nav_target'] = '🏢  Buildings'
+            st.session_state['nav_target'] = '🏛️  Buildings'
             st.rerun()
     with c2:
         st.markdown(f"""<div class="metric-card" style="--accent:#166534">
@@ -702,119 +739,6 @@ if page == "📊  Dashboard":
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    col_left, col_right = st.columns([2, 1])
-
-    with col_left:
-        st.markdown('<div class="section-title">Monthly Inspection Progress</div>', unsafe_allow_html=True)
-        month_order = {m: i for i, m in enumerate(MONTHS_NO_ALL)}
-        month_data = {r['month']: r for r in stats['by_month']}
-        months_plot = MONTHS_NO_ALL
-        done_vals  = [month_data.get(m, {}).get('done', month_data.get(m, {}).get('complete', 0)) for m in months_plot]
-        total_vals = [month_data.get(m, {}).get('total', 0) for m in months_plot]
-        remain_vals = [t - d for t, d in zip(total_vals, done_vals)]
-        cur_month = datetime.now().strftime('%B')
-
-        colors_done   = ['#22c55e' for _ in done_vals]  # single green for all complete
-        colors_remain = ['#fbbf24' if m == cur_month else '#CC2929' for m in months_plot]
-
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='Complete', x=months_plot, y=done_vals,
-                             marker_color=colors_done, text=done_vals,
-                             textposition='inside', textfont=dict(color='white', size=10)))
-        fig.add_trace(go.Bar(name='Remaining', x=months_plot, y=remain_vals,
-                             marker_color=colors_remain, text=remain_vals,
-                             textposition='inside', textfont=dict(color='white', size=10)))
-        fig.update_layout(
-            barmode='stack', height=280,
-            margin=dict(l=0, r=0, t=10, b=0),
-            legend=dict(orientation='h', y=-0.15),
-            plot_bgcolor='white', paper_bgcolor='white',
-            xaxis=dict(tickfont=dict(size=10)),
-            yaxis=dict(showgrid=True, gridcolor='#f0f0f0')
-        )
-        chart_click = st.plotly_chart(fig, use_container_width=True,
-                                       on_select="rerun", key="monthly_chart")
-        if chart_click and chart_click.get("selection", {}).get("points"):
-            clicked_month = chart_click["selection"]["points"][0].get("x")
-            if clicked_month:
-                st.session_state['schedule_month_filter'] = clicked_month
-                st.session_state['nav_target'] = '📅  Schedule'
-                st.rerun()
-
-        # Upcoming this month
-        st.markdown(f'<div class="section-title">Upcoming in {cur_month}</div>', unsafe_allow_html=True)
-        upcoming = [s for s in db.get_schedule(cur_month) if s['status'] != 'Complete'][:10]
-        if upcoming:
-            up_df = pd.DataFrame([{
-                'Building': s['building_name'],
-                'District': s['district'],
-                'Date': s['inspection_date'] or '—',
-                'Est Hrs': s['est_hours'] or '—',
-                'Status': s['status']
-            } for s in upcoming])
-            st.dataframe(up_df, use_container_width=True, hide_index=True,
-                        column_config={'Status': st.column_config.TextColumn(width='small')})
-        else:
-            st.info(f"No pending inspections in {cur_month}")
-
-    with col_right:
-        st.markdown('<div class="section-title">By District</div>', unsafe_allow_html=True)
-        dist_data = [(r['district'], r['cnt']) for r in stats['by_district']
-                     if r['district'] and isinstance(r['district'], str) and len(r['district']) < 30]
-        if dist_data:
-            fig2 = go.Figure(go.Bar(
-                x=[d[1] for d in dist_data],
-                y=[d[0] for d in dist_data],
-                orientation='h',
-                marker_color='#CC2929',
-                text=[d[1] for d in dist_data],
-                textposition='outside'
-            ))
-            fig2.update_layout(
-                height=320, margin=dict(l=0, r=30, t=0, b=0),
-                plot_bgcolor='white', paper_bgcolor='white',
-                xaxis=dict(showgrid=False), yaxis=dict(tickfont=dict(size=10))
-            )
-            dist_click = st.plotly_chart(fig2, use_container_width=True,
-                                           on_select="rerun", key="district_chart")
-            if dist_click and dist_click.get("selection", {}).get("points"):
-                clicked_dist = dist_click["selection"]["points"][0].get("y")
-                if clicked_dist:
-                    st.session_state['buildings_district_filter'] = clicked_dist
-                    st.session_state['nav_target'] = '🏢  Buildings'
-                    st.rerun()
-
-        st.markdown('<div class="section-title">Panel Types</div>', unsafe_allow_html=True)
-        buildings = db.get_buildings()
-        panel_counts = {}
-        for b in buildings:
-            p = b.get('panel_type') or 'Unknown'
-            panel_counts[p] = panel_counts.get(p, 0) + 1
-        panel_counts = {k: v for k, v in panel_counts.items() if k != 'Unknown'}
-        pcolors = {'E-3':'#1e40af','E-3 VOICE':'#166534','S-3':'#6d28d9',
-                   '7100':'#854d0e','7200':'#c2410c','Simplex':'#CC2929'}
-        fig3 = go.Figure(go.Pie(
-            labels=list(panel_counts.keys()),
-            values=list(panel_counts.values()),
-            marker_colors=[pcolors.get(k,'#888') for k in panel_counts],
-            textinfo='label+percent', textfont_size=10,
-            hole=0.4
-        ))
-        fig3.update_layout(height=220, margin=dict(l=0,r=0,t=0,b=0),
-                           showlegend=False, paper_bgcolor='white')
-        panel_click = st.plotly_chart(fig3, use_container_width=True,
-                                       on_select="rerun", key="panel_chart")
-        if panel_click and panel_click.get("selection", {}).get("points"):
-            clicked_panel = panel_click["selection"]["points"][0].get("label")
-            if clicked_panel:
-                st.session_state['buildings_panel_filter'] = clicked_panel
-                st.session_state['nav_target'] = '🏢  Buildings'
-                st.rerun()
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SCHEDULE
-# ══════════════════════════════════════════════════════════════════════════════
 elif page == "📅  Schedule":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
@@ -823,6 +747,43 @@ elif page == "📅  Schedule":
           <p>Click any row to update status · Changes save instantly to the database</p>
         </div>
     </div>''', unsafe_allow_html=True)
+
+
+    # Monthly progress chart + upcoming
+    _fa_stats = db.get_dashboard_stats()
+    _chart_left, _chart_right = st.columns([2, 1])
+    with _chart_left:
+        st.markdown('<div class="section-title">Monthly Inspection Progress</div>', unsafe_allow_html=True)
+        _mdata = {r['month']: r for r in _fa_stats.get('by_month', [])}
+        _months = MONTHS_NO_ALL
+        _done  = [_mdata.get(m, {}).get('complete', 0) for m in _months]
+        _total = [_mdata.get(m, {}).get('total', 0) for m in _months]
+        _rem   = [t - d for t, d in zip(_total, _done)]
+        _cur   = datetime.now().strftime('%B')
+        _cfig = go.Figure()
+        _cfig.add_trace(go.Bar(name='Complete', x=_months, y=_done,
+            marker_color=['#22c55e']*12, text=_done, textposition='inside',
+            textfont=dict(color='white', size=10)))
+        _cfig.add_trace(go.Bar(name='Remaining', x=_months, y=_rem,
+            marker_color=['#fbbf24' if m == _cur else '#CC2929' for m in _months],
+            text=_rem, textposition='inside', textfont=dict(color='white', size=10)))
+        _cfig.update_layout(barmode='stack', height=260,
+            margin=dict(l=0,r=0,t=10,b=0), legend=dict(orientation='h',y=-0.15),
+            plot_bgcolor='white', paper_bgcolor='white',
+            xaxis=dict(tickfont=dict(size=10)), yaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+        _cc = st.plotly_chart(_cfig, use_container_width=True, on_select="rerun", key="sched_fa_chart")
+        if _cc and _cc.get("selection",{}).get("points"):
+            _cm = _cc["selection"]["points"][0].get("x")
+            if _cm: st.session_state['sched_month'] = _cm; st.rerun()
+    with _chart_right:
+        st.markdown(f'<div class="section-title">Upcoming in {_cur}</div>', unsafe_allow_html=True)
+        _upcoming = [s for s in db.get_schedule(_cur) if s['status'] != 'Complete'][:8]
+        if _upcoming:
+            _udf = pd.DataFrame([{'Building': s['building_name'], 'Status': s['status'],
+                                   'Est Hrs': s.get('est_hours','—')} for s in _upcoming])
+            st.dataframe(_udf, use_container_width=True, hide_index=True, height=220)
+        else:
+            st.info(f"No pending in {_cur}")
 
     # Pre-select month if navigated from dashboard chart click
     if 'schedule_month_filter' in st.session_state:
@@ -927,15 +888,15 @@ elif page == "📋  New Inspection":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>Fire Alarm Management Dashboard</h1>
+          <h1>Fire Systems Dashboard</h1>
           <p>University of Utah · Facilities Management · 2026 Inspection Program</p>
         </div>
     </div>''', unsafe_allow_html=True)
 
-    buildings = db.get_buildings()
-    # Store bldg_num as the key — not the label — so it never drifts on rerun
+    buildings = dbm.get_master_buildings()
+    buildings = dbm.sort_buildings(buildings)
     bldg_nums   = [b["bldg_num"] for b in buildings]
-    bldg_labels = [f"{b['bldg_num']} — {b['name']}" for b in buildings]
+    bldg_labels = [f"{b['bldg_num']} — {b.get('name') or b.get('name_alarm','')}" for b in buildings]
 
     # Handle prefill from schedule/buildings page
     if "prefill_bldg" in st.session_state:
@@ -956,7 +917,7 @@ elif page == "📋  New Inspection":
     # Always sync session_state to current selection — survives every rerun
     sel_num = bldg_nums[bldg_labels.index(chosen_label)]
     st.session_state["report_bldg_num"] = sel_num
-    b = db.get_building(sel_num)
+    b = dbm.get_master_building(sel_num)
 
     if b:
         # ── AUTO-POPULATED BUILDING INFO ──────────────────────────────────────
@@ -1374,7 +1335,12 @@ elif page == "📁  Inspection History":
     for insp in inspections:
         result = insp.get('result','—')
         result_icon = '✅' if 'PASS' in str(result) else '❌' if 'FAIL' in str(result) else '⚠️'
-        defs = json.loads(insp.get('deficiencies') or '[]')
+        raw_defs = insp.get('deficiencies') or '[]'
+        if isinstance(raw_defs, list):
+            defs = raw_defs
+        else:
+            try: defs = json.loads(raw_defs)
+            except: defs = []
 
         with st.expander(
             f"{result_icon} **{insp['building_name']}** — {insp['inspection_date']} — {result} — {insp['pct_tested']:.0f}% tested",
@@ -1412,7 +1378,7 @@ elif page == "📁  Inspection History":
             hb1, hb2, hb3 = st.columns([1, 1, 2])
             with hb1:
                 if st.button("🖨️ Print Report", key=f"print_insp_{insp['id']}", use_container_width=True):
-                    b_data = db.get_building(str(insp['bldg_num']))
+                    b_data = dbm.get_master_building(str(insp['bldg_num']))
                     dev_tested_hist = {
                         code: {'total': insp.get(f'{code.lower()}_total',0),
                                'tested': insp.get(f'{code.lower()}_tested',0),
@@ -1440,7 +1406,8 @@ elif page == "📁  Inspection History":
                         'inspector': insp.get('inspector_name',''),
                         'aes': aes_hist,
                         'dev_tested': dev_tested_hist,
-                        'defs': json.loads(insp.get('deficiencies') or '[]'),
+                        'defs': (insp.get('deficiencies') if isinstance(insp.get('deficiencies'), list)
+                                 else (json.loads(insp.get('deficiencies') or '[]') if isinstance(insp.get('deficiencies'), str) else [])),
                         'notes': insp.get('notes',''),
                         'pct': insp.get('pct_tested', 0),
                         'device_results': {k:v for k,v in db.get_device_results(insp['id']).items() if v != '—'},
@@ -1573,23 +1540,25 @@ elif page == "📋  SP New Inspection":
             f'<span style="color:#555">{n_done}/{len(items)} complete</span>'
             f'</div>', unsafe_allow_html=True)
 
-        # Quick actions
-        qa1, qa2, qa3 = st.columns(3)
+        # Quick actions — global
+        st.markdown("**Mark All Items:**")
+        qa1, qa2, qa3, qa4 = st.columns(4)
         with qa1:
-            if st.button("✅ Mark All Pass", key='sp_all_pass'):
+            if st.button("✅ All Pass", key='sp_all_pass'):
                 for it in items: it['status'] = 'Pass'
-                st.session_state['sp_items'] = items
-                st.rerun()
+                st.session_state['sp_items'] = items; st.rerun()
         with qa2:
-            if st.button("— Mark All N/A", key='sp_all_na'):
-                for it in items: it['status'] = 'N/A'
-                st.session_state['sp_items'] = items
-                st.rerun()
+            if st.button("❌ All Fail", key='sp_all_fail'):
+                for it in items: it['status'] = 'Fail'
+                st.session_state['sp_items'] = items; st.rerun()
         with qa3:
+            if st.button("— All N/A", key='sp_all_na'):
+                for it in items: it['status'] = 'N/A'
+                st.session_state['sp_items'] = items; st.rerun()
+        with qa4:
             if st.button("🔄 Clear All", key='sp_clear'):
                 for it in items: it['status'] = ''; it['reading'] = ''; it['comments'] = ''
-                st.session_state['sp_items'] = items
-                st.rerun()
+                st.session_state['sp_items'] = items; st.rerun()
 
         st.divider()
 
@@ -1601,6 +1570,29 @@ elif page == "📋  SP New Inspection":
             if sys_fails: label += f" · ⚠️ {sys_fails} FAIL"
 
             with st.expander(label, expanded=(sys_fails > 0)):
+                # Per-system quick mark
+                sm1, sm2, sm3, sm4 = st.columns(4)
+                with sm1:
+                    if st.button("✅ Pass All", key=f'sp_sys_pass_{sys_name}'):
+                        for it in items:
+                            if it.get('system_type') == sys_name: it['status'] = 'Pass'
+                        st.session_state['sp_items'] = items; st.rerun()
+                with sm2:
+                    if st.button("❌ Fail All", key=f'sp_sys_fail_{sys_name}'):
+                        for it in items:
+                            if it.get('system_type') == sys_name: it['status'] = 'Fail'
+                        st.session_state['sp_items'] = items; st.rerun()
+                with sm3:
+                    if st.button("— N/A All", key=f'sp_sys_na_{sys_name}'):
+                        for it in items:
+                            if it.get('system_type') == sys_name: it['status'] = 'N/A'
+                        st.session_state['sp_items'] = items; st.rerun()
+                with sm4:
+                    if st.button("🔄 Clear", key=f'sp_sys_clr_{sys_name}'):
+                        for it in items:
+                            if it.get('system_type') == sys_name:
+                                it['status'] = ''; it['reading'] = ''; it['comments'] = ''
+                        st.session_state['sp_items'] = items; st.rerun()
                 for idx, it in enumerate(items):
                     if it.get('system_type') != sys_name: continue
 
@@ -1645,15 +1637,21 @@ elif page == "📋  SP New Inspection":
         with sc1:
             insp_date = st.date_input("Inspection Date", value=date.today(), key='sp_date')
         with sc2:
-            n_fail_total = sum(1 for it in items if it.get('status') == 'Fail')
-            if n_fail_total > 0:
-                overall = st.selectbox("Overall Result",
-                    ["FAIL — Deficiencies Noted", "PARTIAL — Some Items Incomplete"],
-                    key='sp_result')
+            n_fail_total  = sum(1 for it in items if it.get('status') == 'Fail')
+            n_done_total  = sum(1 for it in items if it.get('status') in ('Pass','Fail','N/A'))
+            fail_pct      = (n_fail_total / n_done_total * 100) if n_done_total else 0
+            if fail_pct > 50:
+                _auto_result = "FAIL — Deficiencies Noted"
+                _result_opts = ["FAIL — Deficiencies Noted", "PARTIAL — Some Items Incomplete", "PASS"]
+            elif n_fail_total > 0:
+                _auto_result = "PARTIAL — Some Items Incomplete"
+                _result_opts = ["PARTIAL — Some Items Incomplete", "FAIL — Deficiencies Noted", "PASS"]
             else:
-                overall = st.selectbox("Overall Result",
-                    ["PASS", "PARTIAL — Some Items Incomplete"],
-                    key='sp_result')
+                _auto_result = "PASS"
+                _result_opts = ["PASS", "PARTIAL — Some Items Incomplete", "FAIL — Deficiencies Noted"]
+            overall = st.selectbox("Overall Result", _result_opts, key='sp_result')
+            if n_done_total > 0:
+                st.caption(f"{n_fail_total}/{n_done_total} items failed ({fail_pct:.0f}%) — auto-suggest: {_auto_result}")
         with sc3:
             sp_notes = st.text_area("Notes", height=68, key='sp_notes',
                                     placeholder="Overall condition, observations…")
@@ -1698,10 +1696,47 @@ elif page == "📅  SP Schedule":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>Sprinkler System Inspection</h1>
+          <h1>Sprinkler Inspection Schedule</h1>
           <p>NFPA 25 · University of Utah · Facilities Management</p>
         </div>
     </div>''', unsafe_allow_html=True)
+
+    # SP Monthly progress chart + upcoming
+    _sp_stats = dbs.get_sprinkler_dashboard_stats()
+    _sp_left, _sp_right = st.columns([2, 1])
+    with _sp_left:
+        st.markdown('<div class="section-title">Sprinkler Monthly Progress</div>', unsafe_allow_html=True)
+        _spmdata = {r['month']: r for r in _sp_stats.get('by_month', [])}
+        _spmonths = MONTHS_NO_ALL
+        _spdone  = [_spmdata.get(m, {}).get('complete', 0) for m in _spmonths]
+        _sptotal = [_spmdata.get(m, {}).get('total', 0) for m in _spmonths]
+        _sprem   = [t - d for t, d in zip(_sptotal, _spdone)]
+        _spcur   = datetime.now().strftime('%B')
+        _spfig = go.Figure()
+        _spfig.add_trace(go.Bar(name='Complete', x=_spmonths, y=_spdone,
+            marker_color=['#22c55e']*12, text=_spdone, textposition='inside',
+            textfont=dict(color='white', size=10)))
+        _spfig.add_trace(go.Bar(name='Remaining', x=_spmonths, y=_sprem,
+            marker_color=['#0891b2' if m == _spcur else '#1e40af' for m in _spmonths],
+            text=_sprem, textposition='inside', textfont=dict(color='white', size=10)))
+        _spfig.update_layout(barmode='stack', height=260,
+            margin=dict(l=0,r=0,t=10,b=0), legend=dict(orientation='h',y=-0.15),
+            plot_bgcolor='white', paper_bgcolor='white',
+            xaxis=dict(tickfont=dict(size=10)), yaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+        _spcc = st.plotly_chart(_spfig, use_container_width=True, on_select="rerun", key="sched_sp_chart")
+        if _spcc and _spcc.get("selection",{}).get("points"):
+            _spcm = _spcc["selection"]["points"][0].get("x")
+            if _spcm: st.session_state['sp_sched_month'] = _spcm; st.rerun()
+    with _sp_right:
+        st.markdown(f'<div class="section-title">Upcoming in {_spcur}</div>', unsafe_allow_html=True)
+        _sp_up = [s for s in dbs.get_sprinkler_schedule(month=_spcur) if s.get('status') != 'Complete'][:8]
+        if _sp_up:
+            _spudf = pd.DataFrame([{'Bldg': s['bldg_num'], 'Type': s.get('freq_type',''),
+                                     'Status': s.get('status','')} for s in _sp_up])
+            st.dataframe(_spudf, use_container_width=True, hide_index=True, height=220)
+        else:
+            st.info(f"No pending in {_spcur}")
+
     MONTHS = ['All','January','February','March','April','May','June',
               'July','August','September','October','November','December']
     sc1, sc2, sc3 = st.columns([1, 1, 2])
