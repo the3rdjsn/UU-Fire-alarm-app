@@ -44,31 +44,32 @@ def get_master_buildings():
     if not _use_supabase(): return []
     try:
         import streamlit as st
-        @st.cache_data(ttl=120)
-        def _load():
-            sb = _sb()
-            # Fetch in 3 chunks to stay under URL length limit
-            base, offset = [], 0
-            while True:
-                batch = (sb.table("master_buildings").select("bldg_num,name,name_alarm,report_name,asset_name,dfcm_id,property_id,address,city,state,zip,responsibility,district,riser_folder,focalpoint_network,sq_ft,aux,aim_asset,panel_type,year_installed,age,gateway,inspection_month,gateway_ip,anx_ip,gateway_addr,subnet,vlan,amps,nodes,transponders,smoke,heat,pull,duct,notif_devices,init_devices,panel_location,focalpoint_name,total_sp_components,id,image_data,image_ext")
-                         .order("bldg_num").range(offset, offset+999).execute().data or [])
-                base.extend(batch)
-                if len(batch) < 1000: break
-                offset += 1000
-            # Merge sp_ columns part 1
-            sp1_map = {r['bldg_num']: r for r in
-                       sb.table("master_buildings").select("bldg_num,sp_Actuator,sp_AirCompressor,sp_AirCompressorGauge,sp_AirDryer,sp_AirMaintenanceDevice,sp_AirReleaseValve,sp_AirTank,sp_AlarmBell,sp_AlarmLineValve,sp_AlarmTestValve,sp_AlarmValve,sp_AutomaticDrainValve,sp_AuxiliaryDrain,sp_AuxiliaryDrainValve,sp_AuxliaryDrain,sp_Backflow,sp_BallDrip,sp_BallDripFDC,sp_BallValve,sp_CheckValve,sp_CheckValveFDC,sp_CondensateDrainValve,sp_ContolValve,sp_Control,sp_ControlValve,sp_ControlValveOS_Y,sp_ControlValvePIV,sp_ControlValvePRV,sp_DrainDischarge,sp_DripDrum,sp_DryPipeValve,sp_ExpansionTank,sp_FDC,sp_FirePumpController,sp_FlowMeter,sp_HighAirSwitch,sp_HoseValve,sp_HydraulicDesignSign,sp_HydraulicDesignSign5,sp_HydraulicDesignSign6,sp_HydraulicDesignSign7,sp_HydraulicDesignSign8,sp_InspectorsTest,sp_InstallationDrawings,sp_JockeyPumpController,sp_L1M002,sp_LowAirSwitch").execute().data or []}
-            # Merge sp_ columns part 2
-            sp2_map = {r['bldg_num']: r for r in
-                       sb.table("master_buildings").select("bldg_num,sp_MainDrainDischarge,sp_MainDrainValve,sp_MainFeed,sp_ManualEmergencyStation,sp_MasterPressureRegulatingDevice,sp_MechanicalBell,sp_MMTS,sp_MMWF,sp_MonitorModule,sp_MonitorModule_Solenoid_,sp_MonitorModuleHA,sp_MonitorModuleLA,sp_MonitorModulePIV,sp_MonitorModulePS,sp_MonitorModuleSolenoid,sp_MonitorModuleTS,sp_MonitorModuleWF,sp_MonitorModuleWFAT,sp_MonitorMonduleLA,sp_NitrogenExhaustManifold,sp_NitrogenGenerator,sp_NitrogenInjectionManifold,sp_NitrogenInjectionPort,sp_NitrogenTank,sp_PreactionValve,sp_PressureSwitch,sp_Pump,sp_PurgeValve,sp_PushrodChamberSupplyValve,sp_ReliefValve,sp_ResetKnob,sp_RetardingChamber,sp_Riser,sp_RoofManifold,sp_Solenoid,sp_SprinklerBox,sp_Strainer,sp_SupplyGauge,sp_SystemGauge,sp_SystemRiser,sp_TamperSwitch,sp_TestHeader,sp_TransferSwitch,sp_Waterflow,sp_WaterflowTestKey,sp_WaterflowTestPump,sp_WaterTank").execute().data or []}
-            for row in base:
-                bn = row['bldg_num']
-                row.update(sp1_map.get(bn, {}))
-                row.update(sp2_map.get(bn, {}))
-            return base
-        return _load()
+        sb = _sb()
+        # Simple test - just get bldg_num and name first
+        test = sb.table("master_buildings").select("bldg_num,name").limit(5).execute()
+        print(f"TEST QUERY: {len(test.data or [])} rows, data={test.data}")
+        if not test.data:
+            print("ERROR: master_buildings table appears empty or inaccessible")
+            return []
+        # Full fetch - base columns only first
+        all_rows, offset = [], 0
+        while True:
+            batch = (sb.table("master_buildings")
+                     .select("*")
+                     .order("bldg_num")
+                     .range(offset, offset+199)
+                     .execute().data or [])
+            all_rows.extend(batch)
+            print(f"Fetched batch offset={offset}, got {len(batch)} rows, total={len(all_rows)}")
+            if len(batch) < 200: break
+            offset += 200
+        return all_rows
     except Exception as e:
-        print("get_master_buildings error:", e); return []
+        import traceback
+        print(f"get_master_buildings FULL ERROR: {e}")
+        print(traceback.format_exc())
+        return []
+
 
 def get_master_building(bldg_num):
     if not _use_supabase(): return {}
