@@ -79,9 +79,9 @@ def get_master_building(bldg_num):
         base = (sb.table("master_buildings").select("bldg_num,name,name_alarm,report_name,asset_name,dfcm_id,property_id,address,city,state,zip,responsibility,district,riser_folder,focalpoint_network,sq_ft,aux,aim_asset,panel_type,year_installed,age,gateway,inspection_month,gateway_ip,anx_ip,gateway_addr,subnet,vlan,amps,nodes,transponders,smoke,heat,pull,duct,notif_devices,init_devices,panel_location,focalpoint_name,total_sp_components,id,image_data,image_ext")
                 .eq("bldg_num", bn).limit(1).execute().data or [{}])[0]
         if not base: return {}
-        sp1 = (sb.table("master_buildings").select("bldg_num,sp_Actuator,sp_AirCompressor,sp_AirCompressorGauge,sp_AirDryer,sp_AirMaintenanceDevice,sp_AirReleaseValve,sp_AirTank,sp_AlarmBell,sp_AlarmLineValve,sp_AlarmTestValve,sp_AlarmValve,sp_AutomaticDrainValve,sp_AuxiliaryDrain,sp_AuxiliaryDrainValve,sp_AuxliaryDrain,sp_Backflow,sp_BallDrip,sp_BallDripFDC,sp_BallValve,sp_CheckValve,sp_CheckValveFDC,sp_CondensateDrainValve,sp_ContolValve,sp_Control,sp_ControlValve,sp_ControlValveOS_Y,sp_ControlValvePIV,sp_ControlValvePRV,sp_DrainDischarge,sp_DripDrum,sp_DryPipeValve,sp_ExpansionTank,sp_FDC,sp_FirePumpController,sp_FlowMeter,sp_HighAirSwitch,sp_HoseValve,sp_HydraulicDesignSign,sp_HydraulicDesignSign5,sp_HydraulicDesignSign6,sp_HydraulicDesignSign7,sp_HydraulicDesignSign8,sp_InspectorsTest,sp_InstallationDrawings,sp_JockeyPumpController,sp_L1M002,sp_LowAirSwitch")
+        sp1 = (sb.table("master_buildings").select("bldg_num,sp_actuator,sp_aircompressor,sp_aircompressorgauge,sp_airdryer,sp_airmaintenancedevice,sp_airreleasevalve,sp_airtank,sp_alarmbell,sp_alarmlinevalve,sp_alarmtestvalve,sp_alarmvalve,sp_automaticdrainvalve,sp_auxiliarydrain,sp_auxiliarydrainvalve,sp_auxliarydrain,sp_backflow,sp_balldrip,sp_balldripfdc,sp_ballvalve,sp_checkvalve,sp_checkvalvefdc,sp_condensatedrainvalve,sp_contolvalve,sp_control,sp_controlvalve,sp_controlvalveos_y,sp_controlvalvepiv,sp_controlvalveprv,sp_draindischarge,sp_dripdrum,sp_drypipevalve,sp_expansiontank,sp_fdc,sp_firepumpcontroller,sp_flowmeter,sp_highairswitch,sp_hosevalve,sp_hydraulicdesignsign,sp_hydraulicdesignsign5,sp_hydraulicdesignsign6,sp_hydraulicdesignsign7,sp_hydraulicdesignsign8,sp_inspectorstest,sp_installationdrawings,sp_jockeypumpcontroller,sp_l1m002,sp_lowairswitch")
                .eq("bldg_num", bn).limit(1).execute().data or [{}])[0]
-        sp2 = (sb.table("master_buildings").select("bldg_num,sp_MainDrainDischarge,sp_MainDrainValve,sp_MainFeed,sp_ManualEmergencyStation,sp_MasterPressureRegulatingDevice,sp_MechanicalBell,sp_MMTS,sp_MMWF,sp_MonitorModule,sp_MonitorModule_Solenoid_,sp_MonitorModuleHA,sp_MonitorModuleLA,sp_MonitorModulePIV,sp_MonitorModulePS,sp_MonitorModuleSolenoid,sp_MonitorModuleTS,sp_MonitorModuleWF,sp_MonitorModuleWFAT,sp_MonitorMonduleLA,sp_NitrogenExhaustManifold,sp_NitrogenGenerator,sp_NitrogenInjectionManifold,sp_NitrogenInjectionPort,sp_NitrogenTank,sp_PreactionValve,sp_PressureSwitch,sp_Pump,sp_PurgeValve,sp_PushrodChamberSupplyValve,sp_ReliefValve,sp_ResetKnob,sp_RetardingChamber,sp_Riser,sp_RoofManifold,sp_Solenoid,sp_SprinklerBox,sp_Strainer,sp_SupplyGauge,sp_SystemGauge,sp_SystemRiser,sp_TamperSwitch,sp_TestHeader,sp_TransferSwitch,sp_Waterflow,sp_WaterflowTestKey,sp_WaterflowTestPump,sp_WaterTank")
+        sp2 = (sb.table("master_buildings").select("bldg_num,sp_maindraindischarge,sp_maindrainvalve,sp_mainfeed,sp_manualemergencystation,sp_masterpressureregulatingdevice,sp_mechanicalbell,sp_mmts,sp_mmwf,sp_monitormodule,sp_monitormodule_solenoid_,sp_monitormoduleha,sp_monitormodulela,sp_monitormodulepiv,sp_monitormoduleps,sp_monitormodulesolenoid,sp_monitormodulets,sp_monitormodulewf,sp_monitormodulewfat,sp_monitormondulela,sp_nitrogenexhaustmanifold,sp_nitrogengenerator,sp_nitrogeninjectionmanifold,sp_nitrogeninjectionport,sp_nitrogentank,sp_preactionvalve,sp_pressureswitch,sp_pump,sp_purgevalve,sp_pushrodchambersupplyvalve,sp_reliefvalve,sp_resetknob,sp_retardingchamber,sp_riser,sp_roofmanifold,sp_solenoid,sp_sprinklerbox,sp_strainer,sp_supplygauge,sp_systemgauge,sp_systemriser,sp_tamperswitch,sp_testheader,sp_transferswitch,sp_waterflow,sp_waterflowtestkey,sp_waterflowtestpump,sp_watertank")
                .eq("bldg_num", bn).limit(1).execute().data or [{}])[0]
         base.update(sp1)
         base.update(sp2)
@@ -143,6 +143,14 @@ def building_label(b):
 def get_sp_components(b):
     """Return dict of non-zero sprinkler component counts for a building."""
     import re as _re
-    def _safe(name): return 'sp_' + _re.sub(r'[^a-zA-Z0-9_]', '_', name)
-    return {c: int(b.get(_safe(c)) or 0) for c in SP_COMPONENTS
-            if int(b.get(_safe(c)) or 0) > 0}
+    def _safe(name): return 'sp_' + _re.sub(r'[^a-zA-Z0-9_]', '_', name).lower()
+    result = {}
+    for c in SP_COMPONENTS:
+        key = _safe(c)
+        val = b.get(key) or b.get(key.replace('sp_','sp_').lower()) or 0
+        try:
+            v = int(float(val))
+            if v > 0:
+                result[c] = v
+        except: pass
+    return result

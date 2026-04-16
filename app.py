@@ -277,14 +277,17 @@ with st.sidebar:
     }
     </style>""", unsafe_allow_html=True)
 
+    # Pre-check: if session has a header selected, fix it BEFORE creating the widget
+    if st.session_state.get('nav_radio') in NAV_HEADERS:
+        st.session_state['nav_radio'] = "📊  Dashboard"
+
     page = st.radio("Navigation", NAV_OPTIONS,
                     key='nav_radio',
                     label_visibility="collapsed")
 
-    # If a header was somehow selected, default to dashboard
+    # If a header was somehow selected (shouldn't happen now), default to dashboard
     if page in NAV_HEADERS:
-        st.session_state['nav_radio'] = "📊  Dashboard"
-        st.rerun()
+        page = "📊  Dashboard"
 
 
 
@@ -352,16 +355,21 @@ if page == "🏛️  Buildings":
     with tbl_col:
         st.caption(f"**{len(filtered)}** buildings — click a row to view details")
 
+        def _n(v):
+            """Safe int for numeric columns — None becomes pd.NA not empty string"""
+            try: return int(float(v)) if v not in (None, '', 'None') else pd.NA
+            except: return pd.NA
+
         df_tbl = pd.DataFrame([{
             '#':          b['bldg_num'],
             'Building':   b.get('name',''),
             'District':   b.get('district',''),
             'Panel':      b.get('panel_type',''),
             'Insp Month': b.get('inspection_month',''),
-            'Init Dev':   _i(b.get('init_devices')),
-            'Notif Dev':  _i(b.get('notif_devices')),
-            'Sprinklers': _i(b.get('total_sp_components')),
-            'Age (Yrs)':  _i(b.get('age')),
+            'Init Dev':   _n(b.get('init_devices')),
+            'Notif Dev':  _n(b.get('notif_devices')),
+            'Sprinklers': _n(b.get('total_sp_components')),
+            'Age (Yrs)':  _n(b.get('age')),
         } for b in filtered])
 
         def _color_age(val):
