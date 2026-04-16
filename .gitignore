@@ -22,3 +22,5 @@ logo_hrz.png
 logo_hrz_b64.txt
 logo_sidebar.png
 logo_print.png
+!images/
+!images/**
