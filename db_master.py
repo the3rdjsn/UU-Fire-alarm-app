@@ -154,3 +154,47 @@ def get_sp_components(b):
                 result[c] = v
         except: pass
     return result
+
+# ── Component Images ──────────────────────────────────────────────────────────
+
+import os as _os
+
+_REPO_BASE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)))
+_IMAGES_BASE = _os.path.join(_REPO_BASE, "images", "Riser Inventory Pictures")
+
+def get_component_image_path(bldg_num, floor, room, system_type, component, riser_folder):
+    """
+    Returns local file path to a component photo if it exists in the repo,
+    otherwise None.
+    Pattern: images/Riser Inventory Pictures/{riser_folder}/{bldg_num}/{floor} {room}/{bldg_num} {floor} {room} {system_type} {component}.jpg
+    """
+    if not riser_folder:
+        return None
+    try:
+        folder_room = f"{floor} {room}".strip()
+        filename    = f"{bldg_num} {floor} {room} {system_type} {component}.jpg"
+        path = _os.path.join(_IMAGES_BASE, str(riser_folder),
+                             str(bldg_num), folder_room, filename)
+        return path if _os.path.exists(path) else None
+    except:
+        return None
+
+def get_all_component_images(bldg_num, riser_folder):
+    """
+    Return list of all image paths that exist for a given building.
+    Walks the building's image folder.
+    """
+    if not riser_folder:
+        return []
+    try:
+        bldg_dir = _os.path.join(_IMAGES_BASE, str(riser_folder), str(bldg_num))
+        if not _os.path.isdir(bldg_dir):
+            return []
+        paths = []
+        for root, dirs, files in _os.walk(bldg_dir):
+            for f in sorted(files):
+                if f.lower().endswith(('.jpg','.jpeg','.png')):
+                    paths.append(_os.path.join(root, f))
+        return paths
+    except:
+        return []

@@ -495,12 +495,65 @@ if page == "🏛️  Buildings":
                 with t_sp:
                     sp_comps = dbm.get_sp_components(b)
                     total = _i(b.get('total_sp_components'))
+                    riser_folder = b.get('riser_folder','')
                     if not sp_comps:
                         st.info("No sprinkler components on record for this building.")
                     else:
                         st.markdown(f"**Total Counted Components: {total}**")
+
+                        # Check if any photos exist for this building
+                        all_imgs = dbm.get_all_component_images(sel_num, riser_folder)
+                        if all_imgs:
+                            st.caption(f"📷 {len(all_imgs)} component photos on file — select a component to view")
+
                         st.divider()
-                        # Display in two columns sorted by count desc
+
+                        # Component selector + image viewer
+                        comp_list = sorted(sp_comps.keys())
+                        sel_comp = st.selectbox("View Component Photo",
+                                                ["— Select —"] + comp_list,
+                                                key=f"sp_comp_sel_{sel_num}")
+
+                        if sel_comp and sel_comp != "— Select —":
+                            # Find matching inventory rows for this building + component
+                            inv_rows = dbs.get_inventory_for_building(
+                                b.get('focalpoint_name',''), b.get('name',''))
+                            matching = [r for r in inv_rows if r.get('component') == sel_comp]
+
+                            if matching:
+                                # Show image for first match, let user cycle through
+                                img_options = []
+                                for r in matching:
+                                    p = dbm.get_component_image_path(
+                                        bldg_num     = sel_num,
+                                        floor        = r.get('floor',''),
+                                        room         = r.get('room',''),
+                                        system_type  = r.get('system_type',''),
+                                        component    = sel_comp,
+                                        riser_folder = riser_folder
+                                    )
+                                    if p:
+                                        img_options.append((p, r))
+
+                                if img_options:
+                                    if len(img_options) > 1:
+                                        img_idx = st.selectbox(
+                                            f"Location ({len(img_options)} found)",
+                                            range(len(img_options)),
+                                            format_func=lambda i: f"{img_options[i][1].get('floor','')} {img_options[i][1].get('room','')} — {img_options[i][1].get('system_type','')}",
+                                            key=f"sp_img_idx_{sel_num}_{sel_comp}")
+                                    else:
+                                        img_idx = 0
+                                    p, r = img_options[img_idx]
+                                    st.image(p, caption=f"{sel_comp} — {r.get('floor','')} {r.get('room','')} ({r.get('system_type','')})",
+                                             use_container_width=True)
+                                else:
+                                    st.info(f"No photo on file for {sel_comp}")
+                            else:
+                                st.info(f"No inventory records found for {sel_comp}")
+
+                        st.divider()
+                        # Component count table in two columns
                         items = sorted(sp_comps.items(), key=lambda x: -x[1])
                         mid = (len(items) + 1) // 2
                         sp1, sp2 = st.columns(2)
@@ -1948,20 +2001,45 @@ elif page == "🔧  SP Component Inventory":
         disp = {'bldg_num':'Bldg #','floor':'Floor','room':'Room',
                 'system_type':'System Type','component':'Component','address':'Address'}
         df_show = df[[c for c in disp if c in df.columns]].rename(columns=disp)
-        st.write(f"**{len(df_show):,}** components")
+        st.write(f"**{len(df_show):,}** components — click a row to view photo")
         res_col, sum_col = st.columns([3, 1])
         with res_col:
-            st.dataframe(df_show, use_container_width=True, hide_index=True, height=580)
+            inv_sel = st.dataframe(df_show, use_container_width=True, hide_index=True,
+                                   height=540, on_select="rerun",
+                                   selection_mode="single-row", key="inv_tbl")
+            inv_rows = inv_sel.get("selection",{}).get("rows",[]) if inv_sel else []
+            if inv_rows and not df.empty:
+                row = df.iloc[inv_rows[0]]
+                # Look up image
+                riser_folder = bldg_map.get(str(row.get('bldg_num','')), '')
+                # Get riser_folder from master_buildings
+                _mb = dbm.get_master_building(str(row.get('bldg_num','')))
+                riser_folder = _mb.get('riser_folder','') if _mb else ''
+                img_path = dbm.get_component_image_path(
+                    bldg_num    = row.get('bldg_num',''),
+                    floor       = row.get('floor',''),
+                    room        = row.get('room',''),
+                    system_type = row.get('system_type',''),
+                    component   = row.get('component',''),
+                    riser_folder= riser_folder
+                )
+                if img_path:
+                    st.image(img_path,
+                             caption=f"{row.get('component','')} — {row.get('floor','')} {row.get('room','')}",
+                             use_container_width=True)
+                else:
+                    st.info(f"No photo on file for this component")
+
         with sum_col:
             if not df.empty:
                 st.markdown("**By Component**")
                 cc = df["component"].value_counts().reset_index()
                 cc.columns = ["Component","Count"]
-                st.dataframe(cc, use_container_width=True, hide_index=True, height=280)
+                st.dataframe(cc, use_container_width=True, hide_index=True, height=260)
                 st.markdown("**By System Type**")
                 sc = df["system_type"].value_counts().reset_index()
                 sc.columns = ["System","Count"]
-                st.dataframe(sc, use_container_width=True, hide_index=True, height=280)
+                st.dataframe(sc, use_container_width=True, hide_index=True, height=260)
 
     _inventory_tab()
 
