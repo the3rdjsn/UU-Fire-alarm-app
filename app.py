@@ -1807,92 +1807,83 @@ elif page == "🚿  Sprinkler":
 
     # ── TAB 4: COMPONENT INVENTORY ───────────────────────────────────────────
     with sp_tab4:
-        st.markdown('<div class="section-title">Search Sprinkler Components</div>', unsafe_allow_html=True)
 
-        # Load full inventory once into session state — all filtering done locally
-        if 'sp_inv_df' not in st.session_state:
-            with st.spinner("Loading inventory (one-time)..."):
-                raw = dbs.get_full_inventory()
-            if raw:
-                st.session_state['sp_inv_df'] = pd.DataFrame(raw)
-            else:
-                st.warning("No inventory data found. Run the Supabase seed SQL first.")
-                st.stop()
+        @st.fragment
+        def _inventory_tab():
+            st.markdown('<div class="section-title">Search Sprinkler Components</div>', unsafe_allow_html=True)
 
-        df_all = st.session_state['sp_inv_df']
+            if 'sp_inv_df' not in st.session_state:
+                with st.spinner("Loading inventory (one-time)..."):
+                    raw = dbs.get_full_inventory()
+                if raw:
+                    st.session_state['sp_inv_df'] = pd.DataFrame(raw)
+                else:
+                    st.warning("No inventory data. Run seed SQL first.")
+                    return
 
-        # Build filter options from local data — instant, no DB call
-        bldg_map = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
+            df_all = st.session_state['sp_inv_df']
+            bldg_map = {b['bldg_num']: b.get('name','') for b in dbs.get_sprinkler_buildings()}
 
-        def _bnum_label(n):
-            name = bldg_map.get(str(n), '')
-            return f"{n} — {name}" if name else str(n)
+            def _label(n):
+                name = bldg_map.get(str(n),'')
+                return f"{n} — {name}" if name else str(n)
 
-        all_bldgs   = sorted(df_all['bldg_num'].dropna().unique().tolist(),
-                             key=lambda x: (0, int(float(x))) if str(x).replace('.','').isdigit() else (1, str(x)))
-        all_floors  = sorted(df_all['floor'].dropna().unique().tolist())
-        all_systems = sorted(df_all['system_type'].dropna().unique().tolist())
-        all_comps   = sorted(df_all['component'].dropna().unique().tolist())
+            all_bldgs   = sorted(df_all['bldg_num'].dropna().unique().tolist(),
+                                 key=lambda x: (0,int(float(x))) if str(x).replace('.','').isdigit() else (1,str(x)))
+            all_floors  = sorted(df_all['floor'].dropna().unique().tolist())
+            all_systems = sorted(df_all['system_type'].dropna().unique().tolist())
+            all_comps   = sorted(df_all['component'].dropna().unique().tolist())
 
-        st.caption(f"{len(df_all):,} total components across {len(all_bldgs)} buildings — all filtering is instant")
+            st.caption(f"{len(df_all):,} total components across {len(all_bldgs)} buildings")
 
-        # Filter row 1
-        inv_c1, inv_c2, inv_c3 = st.columns([2, 1, 1])
-        with inv_c1:
-            inv_search = st.text_input("🔍 Free-text search", placeholder="Any field…", key='inv_search')
-        with inv_c2:
-            bldg_labels_inv = ['All'] + [_bnum_label(n) for n in all_bldgs]
-            inv_bldg = st.selectbox("Building", bldg_labels_inv, key='inv_bldg')
-        with inv_c3:
-            inv_floor = st.selectbox("Floor", ['All'] + all_floors, key='inv_floor')
+            r1c1, r1c2, r1c3 = st.columns([2, 1, 1])
+            with r1c1:
+                inv_search = st.text_input("🔍 Free-text search", placeholder="Any field…", key='inv_search')
+            with r1c2:
+                inv_bldg = st.selectbox("Building", ['All'] + [_label(n) for n in all_bldgs], key='inv_bldg')
+            with r1c3:
+                inv_floor = st.selectbox("Floor", ['All'] + all_floors, key='inv_floor')
 
-        # Filter row 2
-        inv_c4, inv_c5, inv_c6 = st.columns([2, 2, 1])
-        with inv_c4:
-            inv_system = st.selectbox("System Type", ['All'] + all_systems, key='inv_system')
-        with inv_c5:
-            inv_comp = st.selectbox("Component", ['All'] + all_comps, key='inv_comp')
-        with inv_c6:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔄 Reload", key='inv_reload', use_container_width=True,
-                         help="Refresh inventory from database"):
-                del st.session_state['sp_inv_df']
-                st.rerun()
+            r2c1, r2c2, r2c3 = st.columns([2, 2, 1])
+            with r2c1:
+                inv_system = st.selectbox("System Type", ['All'] + all_systems, key='inv_system')
+            with r2c2:
+                inv_comp = st.selectbox("Component", ['All'] + all_comps, key='inv_comp')
+            with r2c3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔄 Reload", key='inv_reload', use_container_width=True,
+                             help="Refresh from database"):
+                    del st.session_state['sp_inv_df']
+                    st.rerun()
 
-        # ── All filtering done locally in pandas — zero DB calls ─────────────
-        inv_bnum = inv_bldg.split(' — ')[0] if inv_bldg != 'All' else 'All'
-        df = df_all.copy()
+            inv_bnum = inv_bldg.split(' — ')[0] if inv_bldg != 'All' else 'All'
+            df = df_all.copy()
+            if inv_bnum != 'All':
+                df = df[df['bldg_num'].astype(str) == str(inv_bnum)]
+            if inv_floor != 'All':
+                df = df[df['floor'] == inv_floor]
+            if inv_system != 'All':
+                df = df[df['system_type'] == inv_system]
+            if inv_comp != 'All':
+                df = df[df['component'] == inv_comp]
+            if inv_search:
+                s = inv_search.lower()
+                mask = df.apply(lambda row: any(s in str(v).lower() for v in row), axis=1)
+                df = df[mask]
 
-        if inv_bnum != 'All':
-            df = df[df['bldg_num'].astype(str) == str(inv_bnum)]
-        if inv_floor != 'All':
-            df = df[df['floor'] == inv_floor]
-        if inv_system != 'All':
-            df = df[df['system_type'] == inv_system]
-        if inv_comp != 'All':
-            df = df[df['component'] == inv_comp]
-        if inv_search:
-            s = inv_search.lower()
-            mask = df.apply(lambda row: any(s in str(v).lower() for v in row), axis=1)
-            df = df[mask]
+            disp = {'bldg_num':'Bldg #','floor':'Floor','room':'Room',
+                    'system_type':'System Type','component':'Component','address':'Address'}
+            df_show = df[[c for c in disp if c in df.columns]].rename(columns=disp)
+            st.write(f"**{len(df_show):,}** components")
+            st.dataframe(df_show, use_container_width=True, hide_index=True, height=550)
+            if not df.empty:
+                with st.expander("📊 Summary by Component Type"):
+                    cc = df['component'].value_counts().reset_index()
+                    cc.columns = ['Component','Count']
+                    st.dataframe(cc, use_container_width=True, hide_index=True)
 
-        # Display
-        display_cols = {'bldg_num':'Bldg #','floor':'Floor','room':'Room',
-                        'system_type':'System Type','component':'Component','address':'Address'}
-        df_show = df[[c for c in display_cols if c in df.columns]].rename(columns=display_cols)
+        _inventory_tab()
 
-        st.write(f"**{len(df_show):,}** components")
-        st.dataframe(df_show, use_container_width=True, hide_index=True, height=550)
-
-        if not df.empty:
-            with st.expander("📊 Summary by Component Type"):
-                comp_counts = df['component'].value_counts().reset_index()
-                comp_counts.columns = ['Component', 'Count']
-                st.dataframe(comp_counts, use_container_width=True, hide_index=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PRINT REPORT
-# ══════════════════════════════════════════════════════════════════════════════
 elif page == "🖨️  Print Report":
     rdata = st.session_state.get('print_report_data')
 
@@ -2128,4 +2119,3 @@ elif page == "🖨️  Print Report":
             st.rerun()
     with c3:
         st.caption("💡 In print dialog: set **Margins → None**, enable **Background graphics** for best results.")
-
