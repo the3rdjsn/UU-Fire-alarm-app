@@ -1539,7 +1539,7 @@ elif page == "🚿  Sprinkler":
                 st.session_state['sp_items'] = items
                 st.session_state['sp_bnum'] = sel_bnum
                 st.session_state['sp_bname'] = sel_label.split(' — ',1)[-1] if ' — ' in sel_label else sel_label
-                st.session_state['sp_freq'] = freq
+                st.session_state['sp_freq_val'] = freq
                 st.success(f"Loaded {len(items)} inspection items")
                 st.rerun()
             else:
@@ -1550,7 +1550,7 @@ elif page == "🚿  Sprinkler":
         if 'sp_items' in st.session_state and st.session_state.get('sp_bnum') == sel_bnum:
             items = st.session_state['sp_items']
 
-            st.markdown(f"### {st.session_state.get('sp_bname','')} — {st.session_state.get('sp_freq','')} Inspection")
+            st.markdown(f"### {st.session_state.get('sp_bname','')} — {st.session_state.get('sp_freq_val','')} Inspection")
             st.caption(f"{len(items)} items required by NFPA 25")
 
             # Group by system type for easier navigation
@@ -1666,7 +1666,7 @@ elif page == "🚿  Sprinkler":
                     header = {
                         'bldg_num':       sel_bnum,
                         'bldg_name':      st.session_state.get('sp_bname',''),
-                        'freq_type':      st.session_state.get('sp_freq',''),
+                        'freq_type':      st.session_state.get('sp_freq_val',''),
                         'inspection_date': str(insp_date),
                         'inspector_name': inspector,
                         'overall_result': overall,
@@ -1682,7 +1682,7 @@ elif page == "🚿  Sprinkler":
                         # Update schedule status
                         sched = dbs.get_sprinkler_schedule(
                             month=date.today().strftime('%B'),
-                            freq_type=st.session_state.get('sp_freq',''))
+                            freq_type=st.session_state.get('sp_freq_val',''))
                         for s in sched:
                             if str(s.get('bldg_num')) == sel_bnum:
                                 dbs.update_sprinkler_schedule_status(
@@ -2043,4 +2043,3 @@ elif page == "🖨️  Print Report":
             st.rerun()
     with c3:
         st.caption("💡 In print dialog: set **Margins → None**, enable **Background graphics** for best results.")
-
