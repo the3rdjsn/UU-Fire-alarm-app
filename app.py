@@ -308,17 +308,21 @@ with st.sidebar:
     }
     </style>""", unsafe_allow_html=True)
 
-    # Pre-check: if session has a header selected, fix it BEFORE creating the widget
+    # Pre-check: if session has a header selected, revert to previous page (not Dashboard)
     if st.session_state.get('nav_radio') in NAV_HEADERS:
-        st.session_state['nav_radio'] = "📊  Dashboard"
+        # Revert to the last valid page, or Dashboard if none
+        st.session_state['nav_radio'] = st.session_state.get('_last_valid_page', "📊  Dashboard")
 
     page = st.radio("Navigation", NAV_OPTIONS,
                     key='nav_radio',
                     label_visibility="collapsed")
 
-    # If a header was somehow selected (shouldn't happen now), default to dashboard
+    # If a header was somehow selected, stay on current page
     if page in NAV_HEADERS:
-        page = "📊  Dashboard"
+        page = st.session_state.get('_last_valid_page', "📊  Dashboard")
+    else:
+        # Track last valid page
+        st.session_state['_last_valid_page'] = page
 
 
 
@@ -748,7 +752,7 @@ if page == "📊  Dashboard":
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
           <h1>Fire Systems Dashboard</h1>
-          <p>University of Utah · Facilities Management · 2026 Inspection Program</p>
+          <p>University of Utah · Facilities Management</p>
         </div>
     </div>''', unsafe_allow_html=True)
 
@@ -757,8 +761,9 @@ if page == "📊  Dashboard":
     scheduled = stats.get("scheduled", 0)
     done_pct = round(done / scheduled * 100) if scheduled else 0
 
-    # Fire Alarm cards
-    st.markdown('<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:#CC2929;text-transform:uppercase;margin-bottom:4px;border-bottom:2px solid #CC2929;padding-bottom:4px">🔥 FIRE ALARM SYSTEMS (NFPA 72)</div>', unsafe_allow_html=True)
+    # Fire Alarm cards — Calendar Year to Date
+    _cur_year = datetime.now().year
+    st.markdown(f'<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:#CC2929;text-transform:uppercase;margin-bottom:4px;border-bottom:2px solid #CC2929;padding-bottom:4px">🔥 FIRE ALARM SYSTEMS (NFPA 72) — {_cur_year} Year to Date</div>', unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         st.markdown(f"""<div class="metric-card" style="--accent:#CC2929">
@@ -809,9 +814,11 @@ if page == "📊  Dashboard":
             st.session_state['nav_target'] = '📁  Inspection History'
             st.rerun()
 
-    # Sprinkler stats row
+    # Sprinkler stats row — Fiscal Year (Jul–Jun)
     sp_stats = dbs.get_sprinkler_dashboard_stats()
-    st.markdown('<div class="section-title" style="margin-top:16px">Sprinkler Systems (NFPA 25)</div>', unsafe_allow_html=True)
+    _fy_start_year = _cur_year if datetime.now().month >= 7 else _cur_year - 1
+    _fy_label = f"FY{_fy_start_year + 1} (Jul {_fy_start_year} – Jun {_fy_start_year + 1})"
+    st.markdown(f'<div class="section-title" style="margin-top:16px">Sprinkler Systems (NFPA 25) — {_fy_label}</div>', unsafe_allow_html=True)
     sp1, sp2, sp3, sp4, sp5 = st.columns(5)
     with sp1:
         st.markdown(f"""<div class="metric-card" style="--accent:#0369a1">
@@ -3467,6 +3474,103 @@ elif page == "📥  Export Reports":
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             else:
                 st.info("No SP schedule data to export.")
+
+    # Sprinkler Quarterly Report — Building, Name, Date, SystemRiser Reading
+    st.divider()
+    st.markdown("**🚿 Sprinkler Quarterly Riser Report**")
+    st.caption("Building Number, Building Name, Quarterly Inspection Date, SystemRiser Reading")
+
+    rpt_c1, rpt_c2 = st.columns([1, 1])
+    with rpt_c1:
+        _rpt_seasons = ['All', 'Fall 2025', 'Winter 2025/2026', 'Spring 2026', 'Summer 2026']
+        rpt_season = st.selectbox("Filter by Season / Period", _rpt_seasons, key='rpt_sp_season')
+    with rpt_c2:
+        _rpt_fiscal = st.selectbox("Fiscal Year", ['FY2026 (Jul 2025 – Jun 2026)', 'FY2025 (Jul 2024 – Jun 2025)', 'All Time'],
+                                    key='rpt_sp_fy')
+
+    if st.button("📥 Generate Sprinkler Quarterly Riser Report", use_container_width=True, type="primary"):
+        # Get all SP inspections
+        sp_all = dbs.get_sprinkler_inspections()
+        bldg_names_map = {str(b.get('bldg_num','')): b.get('name','') for b in dbm.get_master_buildings()}
+
+        # Filter by fiscal year
+        if 'FY2026' in _rpt_fiscal:
+            sp_all = [i for i in sp_all if i.get('inspection_date','') >= '2025-07-01' and i.get('inspection_date','') <= '2026-06-30']
+        elif 'FY2025' in _rpt_fiscal:
+            sp_all = [i for i in sp_all if i.get('inspection_date','') >= '2024-07-01' and i.get('inspection_date','') <= '2025-06-30']
+
+        # Filter by season
+        if rpt_season == 'Fall 2025':
+            sp_all = [i for i in sp_all if '2025-09' <= i.get('inspection_date','')[:7] <= '2025-11']
+        elif rpt_season == 'Winter 2025/2026':
+            sp_all = [i for i in sp_all if i.get('inspection_date','')[:7] in ('2025-12','2026-01','2026-02')]
+        elif rpt_season == 'Spring 2026':
+            sp_all = [i for i in sp_all if i.get('inspection_date','')[:7] in ('2026-03','2026-04','2026-05')]
+        elif rpt_season == 'Summer 2026':
+            sp_all = [i for i in sp_all if i.get('inspection_date','')[:7] in ('2026-06','2026-07','2026-08')]
+
+        # For each inspection, find SystemRiser readings
+        rpt_rows = []
+        for insp in sp_all:
+            items = dbs.get_sprinkler_inspection_items(insp['id'])
+            # Find SystemRiser items with readings
+            riser_items = [it for it in (items or []) if
+                           it.get('component','') == 'SystemRiser' and it.get('reading','')]
+            bldg_num = str(insp.get('bldg_num',''))
+            bldg_name = insp.get('bldg_name','') or bldg_names_map.get(bldg_num, '')
+
+            if riser_items:
+                for ri in riser_items:
+                    rpt_rows.append({
+                        'Building Number': bldg_num,
+                        'Building Name': bldg_name,
+                        'Inspection Date': insp.get('inspection_date',''),
+                        'Inspector': insp.get('inspector_name',''),
+                        'Frequency': insp.get('freq_type',''),
+                        'System': ri.get('system_type',''),
+                        'Floor / Room': f"{ri.get('floor','')} {ri.get('room','')}".strip(),
+                        'SystemRiser Reading': ri.get('reading',''),
+                        'Status': ri.get('status',''),
+                        'Comments': ri.get('comments',''),
+                        'Overall Result': insp.get('overall_result',''),
+                    })
+            else:
+                # Still include buildings without riser readings
+                rpt_rows.append({
+                    'Building Number': bldg_num,
+                    'Building Name': bldg_name,
+                    'Inspection Date': insp.get('inspection_date',''),
+                    'Inspector': insp.get('inspector_name',''),
+                    'Frequency': insp.get('freq_type',''),
+                    'System': '',
+                    'Floor / Room': '',
+                    'SystemRiser Reading': '— no reading —',
+                    'Status': '',
+                    'Comments': '',
+                    'Overall Result': insp.get('overall_result',''),
+                })
+
+        if rpt_rows:
+            rpt_df = pd.DataFrame(rpt_rows)
+            # Sort by building number
+            rpt_df['_sort'] = rpt_df['Building Number'].apply(
+                lambda x: int(x) if str(x).isdigit() else 9999)
+            rpt_df = rpt_df.sort_values(['_sort','Inspection Date']).drop(columns=['_sort'])
+
+            st.write(f"**{len(rpt_df)} rows** across {rpt_df['Building Number'].nunique()} buildings")
+            st.dataframe(rpt_df, use_container_width=True, hide_index=True, height=400)
+
+            import io
+            buf = io.BytesIO()
+            rpt_df.to_excel(buf, index=False, sheet_name='Quarterly Riser Report')
+            _fy_label = _rpt_fiscal.split(' ')[0] if _rpt_fiscal != 'All Time' else 'AllTime'
+            _season_label = rpt_season.replace(' ','_').replace('/','_')
+            st.download_button("⬇️ Download Quarterly Riser Report.xlsx",
+                               data=buf.getvalue(),
+                               file_name=f"SP_Quarterly_Riser_Report_{_fy_label}_{_season_label}_{date.today().isoformat()}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.info("No sprinkler inspections found for the selected period.")
 
     # Combined deficiency export
     st.divider()
