@@ -519,23 +519,16 @@ if page == "🏛️  Buildings":
                                 break
 
                     if _map_path:
-                        st.caption(f"📄 {os.path.basename(_map_path)}")
                         with open(_map_path, 'rb') as _f:
                             _pdf_bytes = _f.read()
-                        import base64 as _b64
-                        _pdf_b64 = _b64.b64encode(_pdf_bytes).decode()
-                        st.markdown(
-                            f'''<iframe src="data:application/pdf;base64,{_pdf_b64}"
-                            width="100%" height="600px"
-                            style="border:1px solid #e5e5e5;border-radius:8px">
-                            </iframe>''',
-                            unsafe_allow_html=True)
-                        # Also offer direct download
-                        st.download_button("⬇️ Download Map PDF",
+                        st.download_button(
+                            label=f"🗺️ Open Device Map — {os.path.basename(_map_path)}",
                             data=_pdf_bytes,
                             file_name=os.path.basename(_map_path),
                             mime="application/pdf",
-                            key=f"map_dl_{sel_num}")
+                            key=f"map_dl_{sel_num}",
+                            use_container_width=True)
+                        st.caption("Opens in your browser's PDF viewer")
                     else:
                         st.info("No device map on file for this building.")
 
@@ -1542,10 +1535,12 @@ elif page == "🔍  Device Inventory":
         # Use master_buildings for full building list (FocalPoint names)
         _dev_bldgs = dbm.get_master_buildings()
         _dev_bldgs = dbm.sort_buildings(_dev_bldgs)
-        _dev_fp_opts = [b.get('focalpoint_name','') for b in _dev_bldgs if b.get('focalpoint_name','').strip()]
+        _dev_fp_opts = [str(b.get('focalpoint_name') or '').strip()
+                        for b in _dev_bldgs if str(b.get('focalpoint_name') or '').strip()]
+        _dev_fp_map  = {str(b.get('focalpoint_name') or ''): b['bldg_num'] for b in _dev_bldgs}
         bldg_f = st.selectbox("Building", ['All'] + _dev_fp_opts,
                               format_func=lambda x: x if x == 'All' else
-                              f"{next((b['bldg_num'] for b in _dev_bldgs if b.get('focalpoint_name')==x), '')} — {x}")
+                              f"{_dev_fp_map.get(x, '')} — {x}")
 
     @st.cache_data(ttl=60)
     def load_devices(search, type_f, bldg_f):
