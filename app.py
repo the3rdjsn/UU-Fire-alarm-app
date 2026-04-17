@@ -2337,7 +2337,7 @@ elif page == "➕  Add / Import FA Devices":
             dev_bldg = st.selectbox("Building *", _fa_labels, key="add_fa_bldg")
             c1, c2 = st.columns(2)
             with c1:
-                dev_type  = st.text_input("Device Type *", placeholder="e.g. SMOKE, PULL, HEAT, DUCT, NOTIF")
+                dev_type  = st.selectbox("Device Type *", ["","SD — Smoke Detector","HD — Heat Detector","PS — Pull Station","DD — Duct Detector","WF — Waterflow","TS — Tamper Switch","Trans — Transponder","NOTIF — Notification","AES — AES Panel","Beam — Beam Detector","Ext — Fire Extinguisher","Hood — Hood Suppression","CO2 — CO2 Detector","Vesda — VESDA"], key="add_fa_dev_type")
                 dev_point = st.text_input("Point / Address *", placeholder="e.g. 1-001")
             with c2:
                 dev_desc  = st.text_input("Description", placeholder="e.g. 1st Floor Lobby")
@@ -2349,9 +2349,10 @@ elif page == "➕  Add / Import FA Devices":
                 else:
                     sel_bnum = dev_bldg.split(' — ')[0]
                     sel_bldg = next((b for b in _fa_bldgs if b['bldg_num'] == sel_bnum), {})
+                    _dev_type_code = dev_type.split(' — ')[0].strip() if dev_type else ''
                     fields = {
                         'building': sel_bldg.get('focalpoint_name') or sel_bldg.get('name',''),
-                        'type':     dev_type.strip().upper(),
+                        'type':     _dev_type_code,
                         'point':    dev_point.strip(),
                         'description': dev_desc.strip(),
                         'address':  dev_addr.strip(),
@@ -2439,61 +2440,133 @@ elif page == "➕  Add / Import SP Components":
         _sp_bldgs = dbm.sort_buildings(_sp_bldgs)
         _sp_labels = [f"{b['bldg_num']} — {b.get('name','')}" for b in _sp_bldgs]
 
-        with st.form("add_sp_comp_form"):
-            sp_bldg = st.selectbox("Building *", _sp_labels, key="add_sp_bldg")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                sp_floor   = st.text_input("Floor *", placeholder="e.g. Basement")
-                sp_room    = st.text_input("Room *", placeholder="e.g. Mechanical")
-            with c2:
-                sp_system  = st.text_input("System Type *", placeholder="e.g. WetSystem-0")
-                sp_comp    = st.text_input("Component *", placeholder="e.g. Waterflow")
-            with c3:
-                sp_address = st.text_input("Address / Index")
-                sp_ref     = st.text_input("NFPA Reference", placeholder="e.g. 13.2.5")
+        # Load inventory + NFPA standards for cascading (outside form)
+        _sp_inv_all = st.session_state.get('_add_inv_all')
+        _sp_nfpa    = st.session_state.get('_add_nfpa_all')
+        if _sp_inv_all is None:
+            with st.spinner("Loading inventory data..."):
+                _sp_inv_all = dbs.get_full_inventory()
+                _sp_nfpa    = dbs.get_nfpa25_standards()
+                st.session_state['_add_inv_all'] = _sp_inv_all
+                st.session_state['_add_nfpa_all'] = _sp_nfpa
+        _inv_df = pd.DataFrame(_sp_inv_all) if _sp_inv_all else pd.DataFrame()
 
-            sp_photo = st.file_uploader("Component Photo (optional)", type=['jpg','jpeg','png'],
-                                         key='sp_comp_photo')
-            if st.form_submit_button("💾 Add Component", type="primary"):
-                if not sp_floor or not sp_system or not sp_comp:
-                    st.error("Floor, System Type, and Component are required.")
+        # Build NFPA reference lookup: {component: first reference}
+        _nfpa_ref = {}
+        for _s in (_sp_nfpa or []):
+            _c = _s.get('component','')
+            if _c and _c not in _nfpa_ref:
+                _nfpa_ref[_c] = _s.get('reference','')
+
+        # All known component types from NFPA standards
+        _all_comp_types = sorted(set(s.get('component','') for s in (_sp_nfpa or []) if s.get('component')))
+
+        # ── Row 1: Building ───────────────────────────────────────────────────
+        sp_bldg = st.selectbox("Building *", _sp_labels, key="add_sp_bldg")
+        sel_bnum_add = sp_bldg.split(' — ')[0]
+
+        # Filter inventory to building
+        _inv_bldg = _inv_df[_inv_df['bldg_num'].astype(str) == sel_bnum_add] if not _inv_df.empty else pd.DataFrame()
+
+        # ── Row 2: Floor (from building inventory + "Add New") ────────────────
+        _floors_exist = sorted(_inv_bldg['floor'].dropna().unique().tolist()) if not _inv_bldg.empty else []
+        _floor_opts = _floors_exist + ["＋ Add new floor..."]
+        c1, c2 = st.columns(2)
+        with c1:
+            sp_floor_sel = st.selectbox(f"Floor ({len(_floors_exist)} in building)",
+                                        _floor_opts, key="add_sp_floor_sel")
+        with c2:
+            sp_floor_new = st.text_input("New floor name", key="add_sp_floor_new",
+                                         placeholder="e.g. Roof") if sp_floor_sel == "＋ Add new floor..." else None
+        sp_floor = sp_floor_new.strip() if sp_floor_sel == "＋ Add new floor..." and sp_floor_new else (
+                   sp_floor_sel if sp_floor_sel != "＋ Add new floor..." else "")
+
+        # ── Row 3: Room (cascaded to floor) ───────────────────────────────────
+        _inv_floor = _inv_bldg[_inv_bldg['floor'] == sp_floor] if sp_floor and not _inv_bldg.empty else pd.DataFrame()
+        _rooms_exist = sorted(_inv_floor['room'].dropna().unique().tolist()) if not _inv_floor.empty else []
+        _room_opts = _rooms_exist + ["＋ Add new room..."]
+        c3, c4 = st.columns(2)
+        with c3:
+            sp_room_sel = st.selectbox(f"Room ({len(_rooms_exist)} on floor)",
+                                       _room_opts, key="add_sp_room_sel")
+        with c4:
+            sp_room_new = st.text_input("New room name", key="add_sp_room_new",
+                                        placeholder="e.g. Mechanical") if sp_room_sel == "＋ Add new room..." else None
+        sp_room = sp_room_new.strip() if sp_room_sel == "＋ Add new room..." and sp_room_new else (
+                  sp_room_sel if sp_room_sel != "＋ Add new room..." else "")
+
+        # ── Row 4: System Type (cascaded to floor) ────────────────────────────
+        _inv_room = _inv_floor[_inv_floor['room'] == sp_room] if sp_room and not _inv_floor.empty else _inv_floor
+        _sys_exist = sorted(_inv_room['system_type'].dropna().unique().tolist()) if not _inv_room.empty else []
+        _sys_opts  = _sys_exist + ["＋ Add new system..."]
+        c5, c6 = st.columns(2)
+        with c5:
+            sp_sys_sel = st.selectbox(f"System Type ({len(_sys_exist)} in room)",
+                                      _sys_opts, key="add_sp_sys_sel")
+        with c6:
+            sp_sys_new = st.text_input("New system type", key="add_sp_sys_new",
+                                       placeholder="e.g. WetSystem-2") if sp_sys_sel == "＋ Add new system..." else None
+        sp_system = sp_sys_new.strip() if sp_sys_sel == "＋ Add new system..." and sp_sys_new else (
+                    sp_sys_sel if sp_sys_sel != "＋ Add new system..." else "")
+
+        # ── Row 5: Component (from NFPA types) + auto-fill reference ─────────
+        c7, c8, c9 = st.columns(3)
+        with c7:
+            sp_comp = st.selectbox("Component *", [""] + _all_comp_types, key="add_sp_comp_sel")
+        with c8:
+            _auto_ref = _nfpa_ref.get(sp_comp, '') if sp_comp else ''
+            sp_ref = st.text_input("NFPA Reference", value=_auto_ref, key="add_sp_ref_input")
+        with c9:
+            sp_address = st.text_input("Address / Index", key="add_sp_addr")
+
+        if _auto_ref:
+            st.caption(f"📖 Reference auto-filled from NFPA 25 standards for {sp_comp}")
+
+        # ── Photo ─────────────────────────────────────────────────────────────
+        sp_photo = st.file_uploader("Component Photo (optional)", type=['jpg','jpeg','png'],
+                                     key='sp_comp_photo')
+
+        # ── Save button ───────────────────────────────────────────────────────
+        if st.button("💾 Add Component", type="primary", key="add_sp_save"):
+            if not sp_floor or not sp_system or not sp_comp:
+                st.error("Floor, System Type, and Component are required.")
+            else:
+                fields = {
+                    'bldg_num':    sel_bnum_add,
+                    'floor':       sp_floor,
+                    'room':        sp_room,
+                    'system_type': sp_system,
+                    'component':   sp_comp,
+                    'address':     sp_address.strip() if sp_address else '',
+                    'reference':   sp_ref.strip() if sp_ref else '',
+                }
+                result = dbs.add_sp_component(fields)
+                if result:
+                    # Clear inventory cache so new component shows up
+                    if '_add_inv_all' in st.session_state:
+                        del st.session_state['_add_inv_all']
+                    st.success(f"✅ {sp_comp} added to {sp_bldg} — {sp_floor} {sp_room}!")
+                    # Save photo
+                    if sp_photo:
+                        import base64 as _b64
+                        _mb_sp = dbm.get_master_building(sel_bnum_add)
+                        _riser = _mb_sp.get('riser_folder','') if _mb_sp else ''
+                        if _riser:
+                            _img_dir = os.path.join(
+                                os.path.dirname(os.path.abspath(__file__)),
+                                "images", "Riser Inventory Pictures",
+                                _riser, sel_bnum_add, f"{sp_floor} {sp_room}")
+                            os.makedirs(_img_dir, exist_ok=True)
+                            _ext = sp_photo.name.rsplit('.',1)[-1].lower()
+                            _img_name = f"{sel_bnum_add} {sp_floor} {sp_room} {sp_system} {sp_comp}.{_ext}"
+                            with open(os.path.join(_img_dir, _img_name), 'wb') as _f:
+                                _f.write(sp_photo.read())
+                            dbm.clear_image_cache(sel_bnum_add, _riser)
+                            st.info("📷 Photo saved — commit and push to make it permanent.")
+                        else:
+                            st.warning("No riser folder set for this building — photo not saved.")
                 else:
-                    sel_bnum = sp_bldg.split(' — ')[0]
-                    fields = {
-                        'bldg_num':    sel_bnum,
-                        'floor':       sp_floor.strip(),
-                        'room':        sp_room.strip(),
-                        'system_type': sp_system.strip(),
-                        'component':   sp_comp.strip(),
-                        'address':     sp_address.strip(),
-                        'reference':   sp_ref.strip(),
-                    }
-                    result = dbs.add_sp_component(fields)
-                    if result:
-                        st.success(f"✅ {sp_comp} added to {sp_bldg} — {sp_floor} {sp_room}!")
-                        # Save photo to GitHub images folder path if provided
-                        if sp_photo:
-                            import base64 as _b64
-                            _mb_sp = dbm.get_master_building(sel_bnum)
-                            _riser = _mb_sp.get('riser_folder','') if _mb_sp else ''
-                            if _riser:
-                                _img_dir = os.path.join(
-                                    os.path.dirname(os.path.abspath(__file__)),
-                                    "images", "Riser Inventory Pictures",
-                                    _riser, sel_bnum,
-                                    f"{sp_floor.strip()} {sp_room.strip()}")
-                                os.makedirs(_img_dir, exist_ok=True)
-                                _ext = sp_photo.name.rsplit('.',1)[-1].lower()
-                                _img_name = f"{sel_bnum} {sp_floor.strip()} {sp_room.strip()} {sp_system.strip()} {sp_comp.strip()}.{_ext}"
-                                _img_path = os.path.join(_img_dir, _img_name)
-                                with open(_img_path, 'wb') as _f:
-                                    _f.write(sp_photo.read())
-                                dbm.clear_image_cache(sel_bnum, _riser)
-                                st.info(f"📷 Photo saved — commit and push to make it permanent.")
-                            else:
-                                st.warning("No riser folder set for this building — photo not saved.")
-                    else:
-                        st.error("Failed to add component.")
+                    st.error("Failed to add component.")
 
     with tab_import:
         st.markdown("### Bulk Import from Excel / CSV")
