@@ -519,12 +519,9 @@ if page == "🏛️  Buildings":
                                 break
 
                     if _map_path:
-                        import base64 as _b64
-                        import streamlit.components.v1 as _cv1
-                        with open(_map_path, 'rb') as _f:
-                            _pdf_b64 = _b64.b64encode(_f.read()).decode()
                         _fname = os.path.basename(_map_path)
-                        # Download button — browser opens PDF automatically
+                        with open(_map_path, 'rb') as _f:
+                            _pdf_bytes = _f.read()
                         st.download_button(
                             label=f"🗺️ Open Device Map — {_fname}",
                             data=_pdf_bytes,
