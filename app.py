@@ -29,7 +29,7 @@ def get_local_building_image(bldg_num):
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="UofU Fire Alarm Management",
+    page_title="🔥 UofU Fire Systems",
     page_icon="🔥",
     layout="wide",
     initial_sidebar_state="expanded"
