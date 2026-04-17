@@ -216,6 +216,27 @@ MONTHS = ['All','January','February','March','April','May','June',
           'July','August','September','October','November','December']
 MONTHS_NO_ALL = MONTHS[1:]
 
+
+# ── HELPERS ──────────────────────────────────────────────────────────────────
+def render_header(title, subtitle="University of Utah · Facilities Management"):
+    """Render the standard page header with logo — call once per page."""
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+
+
+def sort_buildings_universal(buildings):
+    """Sort buildings by number (numeric first, then alpha)."""
+    def _key(b):
+        n = str(b.get('bldg_num', ''))
+        try: return (0, int(float(n)))
+        except: return (1, n)
+    return sorted(buildings, key=_key)
+
 # ── SIDEBAR ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     if os.path.exists(LOGO_PATH):
@@ -229,6 +250,7 @@ with st.sidebar:
         "📊  Dashboard",
         # Buildings (unified)
         "🏛️  Buildings",
+        "🗺️  Campus Map",
         "➕  Add / Import Buildings",
         # Fire Alarm
         "🔥  ─── Fire Alarm ───",
@@ -244,6 +266,11 @@ with st.sidebar:
         "📁  SP Inspection History",
         "🔧  SP Component Inventory",
         "➕  Add / Import SP Components",
+        # Tools
+        "🛠️  ─── Tools ───",
+        "⚠️  Deficiency Tracker",
+        "📈  Analytics",
+        "📥  Export Reports",
         # Print
         "🖨️  ─── Print ───",
         "🖨️  Print Report",
@@ -254,6 +281,7 @@ with st.sidebar:
         "🔥  ─── Fire Alarm ───",
         "🚿  ─── Sprinkler ───",
         "🖨️  ─── Print ───",
+        "🛠️  ─── Tools ───",
     }
 
     # Programmatic navigation
@@ -423,7 +451,6 @@ if page == "🏛️  Buildings":
                         ('Address',    f"{b.get('address','')} {b.get('city','')} {b.get('state','')} {b.get('zip','')}"),
                         ('District',   b.get('district','')),
                         ('Sq Ft',      f"{int(b.get('sq_ft') or 0):,}"),
-                        ('District',   b.get('district','')),
                         ('AIM Asset',  b.get('aim_asset','')),
                         ('DFCM ID',    b.get('dfcm_id','')),
                         ('FP Network', b.get('focalpoint_network','')),
@@ -825,6 +852,69 @@ if page == "📊  Dashboard":
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Dashboard Charts Row ──────────────────────────────────────────────
+    dash_left, dash_right = st.columns([2, 1])
+    with dash_left:
+        st.markdown('<div class="section-title">Inspection Progress — Cumulative</div>', unsafe_allow_html=True)
+        _mdata = {r['month']: r for r in stats.get('by_month', [])}
+        _cum_done, _cum_total = [], []
+        _rd, _rt = 0, 0
+        for m in MONTHS_NO_ALL:
+            md = _mdata.get(m, {})
+            _rd += md.get('complete', 0)
+            _rt += md.get('total', 0)
+            _cum_done.append(_rd)
+            _cum_total.append(_rt)
+        _cfig = go.Figure()
+        _cfig.add_trace(go.Scatter(x=MONTHS_NO_ALL, y=_cum_total, name='Target',
+                                    mode='lines', line=dict(color='#CC2929', width=2, dash='dot')))
+        _cfig.add_trace(go.Scatter(x=MONTHS_NO_ALL, y=_cum_done, name='Actual',
+                                    mode='lines+markers', line=dict(color='#22c55e', width=3),
+                                    fill='tozeroy', fillcolor='rgba(34,197,94,0.1)'))
+        _cur = datetime.now().strftime('%B')
+        if _cur in MONTHS_NO_ALL:
+            _cfig.add_vline(x=MONTHS_NO_ALL.index(_cur), line_dash="dash",
+                            line_color="#888", opacity=0.5,
+                            annotation_text="Now", annotation_position="top right")
+        _cfig.update_layout(height=260, margin=dict(l=0,r=0,t=10,b=0),
+                            plot_bgcolor='white', paper_bgcolor='white',
+                            legend=dict(orientation='h',y=-0.15),
+                            yaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+        st.plotly_chart(_cfig, use_container_width=True)
+
+    with dash_right:
+        st.markdown('<div class="section-title">Quick Actions</div>', unsafe_allow_html=True)
+        if st.button("🗺️ Campus Map", use_container_width=True, key='dash_map'):
+            st.session_state['nav_target'] = '🗺️  Campus Map'
+            st.rerun()
+        if st.button("⚠️ Deficiency Tracker", use_container_width=True, key='dash_def'):
+            st.session_state['nav_target'] = '⚠️  Deficiency Tracker'
+            st.rerun()
+        if st.button("📈 Analytics", use_container_width=True, key='dash_analytics'):
+            st.session_state['nav_target'] = '📈  Analytics'
+            st.rerun()
+        if st.button("📥 Export Reports", use_container_width=True, key='dash_export'):
+            st.session_state['nav_target'] = '📥  Export Reports'
+            st.rerun()
+
+        # Quick deficiency count
+        _all_insp = db.get_inspections()
+        _def_count = 0
+        for _insp in (_all_insp or []):
+            _raw = _insp.get('deficiencies') or '[]'
+            if isinstance(_raw, list): _def_count += len(_raw)
+            else:
+                try: _def_count += len(json.loads(_raw))
+                except: pass
+        _open_color = '#991b1b' if _def_count > 0 else '#166534'
+        st.markdown(
+            f'<div style="background:#f9f9f9;border-radius:8px;padding:12px;'
+            f'border-left:4px solid {_open_color};margin-top:8px">'
+            f'<div style="font-size:11px;color:#888;text-transform:uppercase;font-weight:600">Open Deficiencies</div>'
+            f'<div style="font-size:28px;font-weight:800;color:{_open_color}">{_def_count}</div>'
+            f'</div>', unsafe_allow_html=True)
+
 elif page == "📅  Schedule":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
@@ -974,8 +1064,8 @@ elif page == "📋  New Inspection":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>Fire Systems Dashboard</h1>
-          <p>University of Utah · Facilities Management · 2026 Inspection Program</p>
+          <h1>New Fire Alarm Inspection</h1>
+          <p>NFPA 72 · University of Utah · Facilities Management</p>
         </div>
     </div>''', unsafe_allow_html=True)
 
@@ -1239,14 +1329,15 @@ elif page == "📋  New Inspection":
         # ── DEFICIENCIES ───────────────────────────────────────────────────────
         st.markdown('<div class="section-title">Deficiencies</div>', unsafe_allow_html=True)
 
-        if 'deficiencies' not in st.session_state:
-            st.session_state.deficiencies = []
+        _def_key = f'deficiencies_{sel_num}'
+        if _def_key not in st.session_state:
+            st.session_state[_def_key] = []
 
         # Auto-populate deficiencies from failed FP devices
         fp_results_key = f'fp_results_{sel_num}'
         fp_res_cur = st.session_state.get(fp_results_key, {})
         if fp_res_cur and fp_devices:
-            existing_points = {d.get('location','') for d in st.session_state.deficiencies}
+            existing_points = {d.get('location','') for d in st.session_state[_def_key]}
             for idx_str, result in fp_res_cur.items():
                 if result == 'Fail':
                     try:
@@ -1255,7 +1346,7 @@ elif page == "📋  New Inspection":
                         if point not in existing_points:
                             dtype = str(dev.get('type', ''))
                             desc  = str(dev.get('description', ''))
-                            st.session_state.deficiencies.append({
+                            st.session_state[_def_key].append({
                                 'device':    dtype,
                                 'location':  point,
                                 'issue':     f"FAILED — {desc}" if desc else "FAILED",
@@ -1269,12 +1360,12 @@ elif page == "📋  New Inspection":
         col_add, col_clear = st.columns([1, 1])
         with col_add:
             if st.button("➕ Add Deficiency"):
-                st.session_state.deficiencies.append(
+                st.session_state[_def_key].append(
                     {'device': '', 'location': '', 'issue': '', 'part': '', 'corrected': 'No'})
         with col_clear:
             if st.button("🔄 Sync Failed Devices", help="Re-pull all Fail results from FocalPoint list"):
                 existing_points = set()
-                st.session_state.deficiencies = []
+                st.session_state[_def_key] = []
                 for idx_str, result in fp_res_cur.items():
                     if result == 'Fail':
                         try:
@@ -1283,7 +1374,7 @@ elif page == "📋  New Inspection":
                             if point not in existing_points:
                                 dtype = str(dev.get('type', ''))
                                 desc  = str(dev.get('description', ''))
-                                st.session_state.deficiencies.append({
+                                st.session_state[_def_key].append({
                                     'device':    dtype,
                                     'location':  point,
                                     'issue':     f"FAILED — {desc}" if desc else "FAILED",
@@ -1295,7 +1386,7 @@ elif page == "📋  New Inspection":
                             pass
                 st.rerun()
 
-        for i, d in enumerate(st.session_state.deficiencies):
+        for i, d in enumerate(st.session_state[_def_key]):
             with st.container():
                 dc1, dc2, dc3, dc4, dc5, dc6 = st.columns([1, 2, 3, 2, 1, 0.5])
                 with dc1:
@@ -1315,10 +1406,10 @@ elif page == "📋  New Inspection":
                                                   key=f'def_fix_{i}')
                 with dc6:
                     if st.button("✕", key=f'def_del_{i}'):
-                        st.session_state.deficiencies.pop(i)
+                        st.session_state[_def_key].pop(i)
                         st.rerun()
 
-        if not st.session_state.deficiencies:
+        if not st.session_state[_def_key]:
             st.info("No deficiencies — click Add Deficiency if needed")
 
         # ── NOTES ──────────────────────────────────────────────────────────────
@@ -1353,13 +1444,13 @@ elif page == "📋  New Inspection":
                     'aes_duct':  aes_vals.get('Duct','PASS'),
                     'aes_ext':   aes_vals.get('Fire Ext','PASS'),
                 }
-                insp_id = db.save_inspection(data, st.session_state.deficiencies)
+                insp_id = db.save_inspection(data, st.session_state[_def_key])
                 # Save FocalPoint device results
                 fp_results_key = f'fp_results_{sel_num}'
                 fp_res = st.session_state.get(fp_results_key, {})
                 if fp_res:
                     db.save_device_results(insp_id, fp_res)
-                st.session_state.deficiencies = []
+                st.session_state[_def_key] = []
                 st.session_state[fp_results_key] = {}
                 st.success(f"✅ Report saved for **{b['name']}** — ID #{insp_id}")
                 st.balloons()
@@ -1384,7 +1475,7 @@ elif page == "📋  New Inspection":
                     'bldg': b, 'date': str(insp_date), 'wo': work_order,
                     'type': insp_type, 'result': result, 'inspector': inspector,
                     'aes': aes_vals, 'dev_tested': dev_tested,
-                    'defs': list(st.session_state.get('deficiencies', [])),
+                    'defs': list(st.session_state.get(_def_key, [])),
                     'notes': notes, 'pct': pct,
                     'device_results': captured_fp,
                 }
@@ -1399,8 +1490,8 @@ elif page == "📁  Inspection History":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>2026 Inspection Schedule</h1>
-          <p>Click any row to update status · Changes save instantly to the database</p>
+          <h1>Fire Alarm Inspection History</h1>
+          <p>Saved inspection reports · Click any row to view, print, or edit</p>
         </div>
     </div>''', unsafe_allow_html=True)
 
@@ -1605,7 +1696,6 @@ elif page == "📋  SP New Inspection":
             if st.button('🖨️ Print Last Saved Report', key='sp_print_last'):
                 st.session_state.pop('print_report_data', None)
                 st.session_state['nav_target'] = '🖨️  Print Report'
-                st.rerun()
                 st.rerun()
         with pc2:
             if st.button('✕ Dismiss', key='sp_print_dismiss'):
@@ -2018,8 +2108,8 @@ elif page == "🔧  SP Component Inventory":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>Sprinkler System Inspection</h1>
-          <p>NFPA 25 · University of Utah · Facilities Management</p>
+          <h1>Sprinkler Component Inventory</h1>
+          <p>NFPA 25 · Search and browse all riser components by building, floor, system</p>
         </div>
     </div>''', unsafe_allow_html=True)
 
@@ -2660,6 +2750,656 @@ elif page == "➕  Add / Import SP Components":
                 st.error(f"Error reading file: {e}")
                 st.code(traceback.format_exc())
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CAMPUS MAP
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "🗺️  Campus Map":
+    render_header("Campus Building Map", "Inspection status at a glance · Click a building for details")
+
+    all_buildings = dbm.get_master_buildings()
+    all_buildings = dbm.sort_buildings(all_buildings)
+
+    # Get schedule status for each building
+    fa_schedule = db.get_schedule()
+    sp_schedule = dbs.get_sprinkler_schedule()
+
+    # Build status lookup: bldg_num → status
+    bldg_status = {}
+    for s in fa_schedule:
+        bn = str(s.get('bldg_num','')).split('.')[0]
+        status = s.get('status','Pending')
+        # Worst status wins: Overdue > In Progress > Pending > Complete
+        rank = {'Overdue':0, 'In Progress':1, 'Pending':2, 'Construction':3, 'Complete':4}
+        if bn not in bldg_status or rank.get(status,5) < rank.get(bldg_status[bn],5):
+            bldg_status[bn] = status
+
+    # Color mapping
+    status_colors = {
+        'Complete': '#22c55e',
+        'In Progress': '#3b82f6',
+        'Pending': '#f59e0b',
+        'Overdue': '#ef4444',
+        'Construction': '#8b5cf6',
+    }
+
+    # Filter
+    map_filter = st.selectbox("Filter by Status", ['All','Complete','Overdue','Pending','In Progress','Construction'], key='map_filter')
+
+    # Build scatter data — use UofU campus coords as base
+    # Center: 40.7649, -111.8421 (UofU campus)
+    import random
+    random.seed(42)
+
+    map_data = []
+    for b in all_buildings:
+        bn = str(b.get('bldg_num',''))
+        status = bldg_status.get(bn, 'Pending')
+        if map_filter != 'All' and status != map_filter:
+            continue
+
+        # Generate deterministic coordinates based on bldg_num hash
+        h = hash(bn)
+        lat = 40.7649 + (h % 1000 - 500) / 10000.0
+        lon = -111.8421 + ((h >> 10) % 1000 - 500) / 10000.0
+
+        sp_count = int(b.get('total_sp_components') or 0)
+        name = b.get('name','') or f"Building {bn}"
+        district = b.get('district','')
+        panel = b.get('panel_type','')
+
+        map_data.append({
+            'bldg_num': bn, 'name': name, 'lat': lat, 'lon': lon,
+            'status': status, 'color': status_colors.get(status, '#888'),
+            'district': district, 'panel': panel,
+            'has_sprinkler': '🚿' if sp_count > 0 else '',
+            'hover': f"#{bn} {name} | {district} | {panel} | {status}",
+        })
+
+    if map_data:
+        df_map = pd.DataFrame(map_data)
+
+        # Summary row
+        mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+        mc1.metric("Total on Map", len(df_map))
+        mc2.metric("✅ Complete", len(df_map[df_map['status']=='Complete']))
+        mc3.metric("🔴 Overdue", len(df_map[df_map['status']=='Overdue']))
+        mc4.metric("🟡 Pending", len(df_map[df_map['status']=='Pending']))
+        mc5.metric("🔵 In Progress", len(df_map[df_map['status']=='In Progress']))
+
+        # Plotly scatter mapbox
+        fig = px.scatter_mapbox(
+            df_map, lat='lat', lon='lon',
+            color='status',
+            color_discrete_map=status_colors,
+            hover_name='name',
+            hover_data={'bldg_num':True, 'district':True, 'panel':True, 'status':True,
+                        'lat':False, 'lon':False, 'color':False, 'hover':False, 'has_sprinkler':True},
+            size_max=15,
+            zoom=14.5,
+            center={'lat': 40.7649, 'lon': -111.8421},
+            mapbox_style='open-street-map',
+            height=620,
+        )
+        fig.update_traces(marker=dict(size=12, opacity=0.85))
+        fig.update_layout(margin=dict(l=0,r=0,t=0,b=0),
+                          legend=dict(orientation='h', y=-0.05, font=dict(size=12)))
+
+        selected = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="campus_map")
+
+        # If a point is clicked, show building detail
+        if selected and selected.get("selection",{}).get("points"):
+            pt = selected["selection"]["points"][0]
+            idx = pt.get("point_index", 0)
+            if idx < len(df_map):
+                clicked = df_map.iloc[idx]
+                st.divider()
+                st.markdown(f"### #{clicked['bldg_num']} — {clicked['name']}")
+                ic1, ic2, ic3, ic4 = st.columns(4)
+                ic1.write(f"**District:** {clicked['district']}")
+                ic2.write(f"**Panel:** {clicked['panel']}")
+                ic3.write(f"**Status:** {clicked['status']}")
+                ic4.write(f"**Sprinkler:** {'Yes' if clicked['has_sprinkler'] else 'No'}")
+
+                bc1, bc2 = st.columns(2)
+                with bc1:
+                    if st.button("🏛️ View Building Details", key=f"map_bldg_{clicked['bldg_num']}", type="primary"):
+                        st.session_state['mb_detail_sel'] = f"{clicked['bldg_num']} — {clicked['name']}"
+                        st.session_state['nav_target'] = '🏛️  Buildings'
+                        st.rerun()
+                with bc2:
+                    if st.button("📋 Start Inspection", key=f"map_insp_{clicked['bldg_num']}"):
+                        st.session_state['prefill_bldg'] = clicked['bldg_num']
+                        st.session_state['nav_target'] = '📋  New Inspection'
+                        st.rerun()
+    else:
+        st.info("No buildings match the selected filter.")
+
+    # Legend / district summary
+    st.divider()
+    st.markdown("**Buildings by District**")
+    dist_counts = {}
+    for b in all_buildings:
+        d = b.get('district','Unknown')
+        dist_counts[d] = dist_counts.get(d, 0) + 1
+    dist_df = pd.DataFrame([{'District': d, 'Buildings': c} for d, c in sorted(dist_counts.items(), key=lambda x: -x[1])])
+    st.dataframe(dist_df, use_container_width=True, hide_index=True, height=250)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEFICIENCY TRACKER
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "⚠️  Deficiency Tracker":
+    render_header("Deficiency Tracker", "Track, manage, and resolve inspection deficiencies across all systems")
+
+    # Pull all FA inspections with deficiencies
+    all_inspections = db.get_inspections()
+    all_sp_inspections = dbs.get_sprinkler_inspections()
+
+    # Collect deficiencies from FA inspections
+    all_defs = []
+    for insp in (all_inspections or []):
+        raw = insp.get('deficiencies') or '[]'
+        if isinstance(raw, list):
+            defs = raw
+        else:
+            try: defs = json.loads(raw)
+            except: defs = []
+        for d in defs:
+            all_defs.append({
+                'id': f"FA-{insp['id']}-{d.get('location','')}",
+                'source': 'Fire Alarm',
+                'building': insp.get('building_name',''),
+                'bldg_num': insp.get('bldg_num',''),
+                'date_found': insp.get('inspection_date',''),
+                'device': d.get('device',''),
+                'location': d.get('location',''),
+                'issue': d.get('issue',''),
+                'part': d.get('part',''),
+                'corrected': d.get('corrected','No'),
+                'inspector': insp.get('inspector_name',''),
+            })
+
+    # Collect deficiencies from SP inspections
+    for insp in (all_sp_inspections or []):
+        items = dbs.get_sprinkler_inspection_items(insp['id'])
+        for it in (items or []):
+            if it.get('status') in ('Critical','Non Critical','Impairment'):
+                all_defs.append({
+                    'id': f"SP-{insp['id']}-{it.get('component','')}",
+                    'source': 'Sprinkler',
+                    'building': insp.get('bldg_name',''),
+                    'bldg_num': insp.get('bldg_num',''),
+                    'date_found': insp.get('inspection_date',''),
+                    'device': it.get('component',''),
+                    'location': f"{it.get('floor','')} {it.get('room','')}".strip(),
+                    'issue': f"{it.get('status','')} — {it.get('comments','')}" if it.get('comments') else it.get('status',''),
+                    'part': '',
+                    'corrected': 'No',
+                    'inspector': insp.get('inspector_name',''),
+                })
+
+    # Summary cards
+    total_defs = len(all_defs)
+    open_defs = sum(1 for d in all_defs if d['corrected'] == 'No')
+    partial_defs = sum(1 for d in all_defs if d['corrected'] == 'Partial')
+    fixed_defs = sum(1 for d in all_defs if d['corrected'] == 'Yes')
+    fa_defs = sum(1 for d in all_defs if d['source'] == 'Fire Alarm')
+    sp_defs = sum(1 for d in all_defs if d['source'] == 'Sprinkler')
+
+    dc1, dc2, dc3, dc4, dc5, dc6 = st.columns(6)
+    dc1.metric("Total Deficiencies", total_defs)
+    dc2.metric("🔴 Open", open_defs)
+    dc3.metric("🟡 Partial", partial_defs)
+    dc4.metric("✅ Fixed", fixed_defs)
+    dc5.metric("🔥 Fire Alarm", fa_defs)
+    dc6.metric("🚿 Sprinkler", sp_defs)
+
+    # Aging metrics
+    if all_defs:
+        from datetime import datetime
+        today = date.today()
+        ages = []
+        for d in all_defs:
+            if d['corrected'] == 'No' and d['date_found']:
+                try:
+                    found = datetime.strptime(d['date_found'], '%Y-%m-%d').date()
+                    ages.append((today - found).days)
+                except: pass
+        if ages:
+            avg_age = sum(ages) / len(ages)
+            max_age = max(ages)
+            st.markdown(
+                f'<div style="background:#fef2f2;border-left:4px solid #ef4444;padding:12px 16px;'
+                f'border-radius:0 8px 8px 0;margin:12px 0;font-size:13px">'
+                f'⏱️ <b>{len(ages)} open deficiencies</b> averaging <b>{avg_age:.0f} days</b> old '
+                f'(oldest: <b>{max_age} days</b>)</div>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # Filters
+    df1, df2, df3 = st.columns([1,1,1])
+    with df1:
+        def_source = st.selectbox("Source", ['All','Fire Alarm','Sprinkler'], key='def_source')
+    with df2:
+        def_status = st.selectbox("Status", ['All','Open (No)','Partial','Fixed (Yes)'], key='def_status')
+    with df3:
+        def_search = st.text_input("Search", placeholder="Building, device, issue…", key='def_search')
+
+    filtered_defs = all_defs
+    if def_source != 'All':
+        filtered_defs = [d for d in filtered_defs if d['source'] == def_source]
+    if def_status == 'Open (No)':
+        filtered_defs = [d for d in filtered_defs if d['corrected'] == 'No']
+    elif def_status == 'Partial':
+        filtered_defs = [d for d in filtered_defs if d['corrected'] == 'Partial']
+    elif def_status == 'Fixed (Yes)':
+        filtered_defs = [d for d in filtered_defs if d['corrected'] == 'Yes']
+    if def_search:
+        q = def_search.lower()
+        filtered_defs = [d for d in filtered_defs if
+                         q in d.get('building','').lower() or
+                         q in d.get('device','').lower() or
+                         q in d.get('issue','').lower() or
+                         q in d.get('location','').lower()]
+
+    if filtered_defs:
+        def_df = pd.DataFrame([{
+            'Source':   d['source'],
+            'Building': f"#{d['bldg_num']} {d['building']}",
+            'Date':     d['date_found'],
+            'Device':   d['device'],
+            'Location': d['location'],
+            'Issue':    d['issue'],
+            'Part #':   d['part'],
+            'Status':   d['corrected'],
+        } for d in filtered_defs])
+
+        def _color_status(val):
+            if val == 'No': return 'background-color:#fee2e2;color:#991b1b;font-weight:bold'
+            if val == 'Yes': return 'background-color:#dcfce7;color:#166534;font-weight:bold'
+            if val == 'Partial': return 'background-color:#fef9c3;color:#854d0e;font-weight:bold'
+            return ''
+
+        styled_def = def_df.style.map(_color_status, subset=['Status'])
+        st.dataframe(styled_def, use_container_width=True, hide_index=True, height=500)
+    else:
+        st.success("🎉 No deficiencies found matching your filters. Nice work!")
+
+    # Deficiencies by building chart
+    if all_defs:
+        st.divider()
+        st.markdown("**Open Deficiencies by Building**")
+        open_by_bldg = {}
+        for d in all_defs:
+            if d['corrected'] == 'No':
+                key = f"#{d['bldg_num']} {d['building']}"
+                open_by_bldg[key] = open_by_bldg.get(key, 0) + 1
+        if open_by_bldg:
+            sorted_bldgs = sorted(open_by_bldg.items(), key=lambda x: -x[1])[:20]
+            bldg_names = [x[0] for x in sorted_bldgs]
+            bldg_counts = [x[1] for x in sorted_bldgs]
+            fig_def = go.Figure(go.Bar(
+                y=bldg_names[::-1], x=bldg_counts[::-1],
+                orientation='h', marker_color='#ef4444',
+                text=bldg_counts[::-1], textposition='auto'))
+            fig_def.update_layout(height=max(300, len(sorted_bldgs)*28),
+                                  margin=dict(l=0,r=0,t=10,b=0),
+                                  plot_bgcolor='white', paper_bgcolor='white',
+                                  xaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+            st.plotly_chart(fig_def, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ANALYTICS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "📈  Analytics":
+    render_header("Fire Systems Analytics", "Trends, breakdowns, and insights across all campus fire systems")
+
+    stats = db.get_dashboard_stats()
+    sp_stats = dbs.get_sprinkler_dashboard_stats()
+    all_buildings = dbm.get_master_buildings()
+
+    # ── Inspection Completion Over Time ────────────────────────────────────
+    st.markdown('<div class="section-title">Inspection Completion — Cumulative</div>', unsafe_allow_html=True)
+    _mdata = {r['month']: r for r in stats.get('by_month', [])}
+    cumulative_done = []
+    cumulative_total = []
+    running_done = 0
+    running_total = 0
+    for m in MONTHS_NO_ALL:
+        md = _mdata.get(m, {})
+        running_done += md.get('complete', 0)
+        running_total += md.get('total', 0)
+        cumulative_done.append(running_done)
+        cumulative_total.append(running_total)
+
+    fig_cum = go.Figure()
+    fig_cum.add_trace(go.Scatter(x=MONTHS_NO_ALL, y=cumulative_total, name='Scheduled (cumulative)',
+                                  mode='lines', line=dict(color='#CC2929', width=2, dash='dot')))
+    fig_cum.add_trace(go.Scatter(x=MONTHS_NO_ALL, y=cumulative_done, name='Completed (cumulative)',
+                                  mode='lines+markers', line=dict(color='#22c55e', width=3),
+                                  fill='tozeroy', fillcolor='rgba(34,197,94,0.1)'))
+    # Mark current month
+    cur_month = datetime.now().strftime('%B')
+    if cur_month in MONTHS_NO_ALL:
+        cur_idx = MONTHS_NO_ALL.index(cur_month)
+        fig_cum.add_vline(x=cur_idx, line_dash="dash", line_color="#888", opacity=0.5,
+                          annotation_text="Today", annotation_position="top right")
+    fig_cum.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=0),
+                          plot_bgcolor='white', paper_bgcolor='white',
+                          legend=dict(orientation='h', y=-0.15),
+                          yaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+    st.plotly_chart(fig_cum, use_container_width=True)
+
+    # ── System Age Distribution ───────────────────────────────────────────
+    an1, an2 = st.columns(2)
+    with an1:
+        st.markdown('<div class="section-title">System Age Distribution</div>', unsafe_allow_html=True)
+        ages = [int(b.get('age') or 0) for b in all_buildings if b.get('age')]
+        if ages:
+            fig_age = go.Figure(go.Histogram(
+                x=ages, nbinsx=20,
+                marker_color=['#22c55e' if a < 10 else '#f59e0b' if a < 15 else '#ef4444' for a in sorted(ages)],
+                marker_line_color='white', marker_line_width=1))
+            fig_age.add_vrect(x0=15, x1=max(ages)+1, fillcolor='rgba(239,68,68,0.08)',
+                              line_width=0, annotation_text="⚠️ >15 yrs", annotation_position="top left")
+            fig_age.update_layout(height=280, margin=dict(l=0,r=0,t=10,b=0),
+                                  plot_bgcolor='white', paper_bgcolor='white',
+                                  xaxis_title="System Age (years)", yaxis_title="Buildings",
+                                  xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+            # Use simple green color for histogram since per-bar coloring is complex
+            fig_age.update_traces(marker_color='#CC2929')
+            st.plotly_chart(fig_age, use_container_width=True)
+
+            # Age summary
+            old_20 = sum(1 for a in ages if a >= 20)
+            old_15 = sum(1 for a in ages if 15 <= a < 20)
+            st.markdown(
+                f'<div style="font-size:12px;padding:8px;background:#f9f9f9;border-radius:6px">'
+                f'🔴 <b>{old_20}</b> systems ≥20 yrs &nbsp;·&nbsp; '
+                f'🟠 <b>{old_15}</b> systems 15-19 yrs &nbsp;·&nbsp; '
+                f'Average age: <b>{sum(ages)/len(ages):.1f}</b> yrs</div>',
+                unsafe_allow_html=True)
+
+    with an2:
+        st.markdown('<div class="section-title">Buildings by Panel Type</div>', unsafe_allow_html=True)
+        panel_counts = {}
+        for b in all_buildings:
+            pt = b.get('panel_type','Unknown') or 'Unknown'
+            panel_counts[pt] = panel_counts.get(pt, 0) + 1
+        if panel_counts:
+            sorted_panels = sorted(panel_counts.items(), key=lambda x: -x[1])
+            colors_panel = ['#CC2929','#1e40af','#166534','#854d0e','#7c3aed','#0891b2','#be185d','#065f46']
+            fig_panel = go.Figure(go.Pie(
+                labels=[p[0] for p in sorted_panels],
+                values=[p[1] for p in sorted_panels],
+                marker=dict(colors=colors_panel[:len(sorted_panels)]),
+                hole=0.4, textinfo='label+value',
+                textfont=dict(size=11)))
+            fig_panel.update_layout(height=320, margin=dict(l=0,r=0,t=10,b=30),
+                                    showlegend=False)
+            st.plotly_chart(fig_panel, use_container_width=True)
+
+    # ── District Breakdown ────────────────────────────────────────────────
+    st.markdown('<div class="section-title">Buildings by District</div>', unsafe_allow_html=True)
+    dist_data = {}
+    for b in all_buildings:
+        d = b.get('district','Unknown') or 'Unknown'
+        if d not in dist_data:
+            dist_data[d] = {'buildings':0, 'init_devices':0, 'sp_components':0, 'avg_age':[]}
+        dist_data[d]['buildings'] += 1
+        dist_data[d]['init_devices'] += int(b.get('init_devices') or 0)
+        dist_data[d]['sp_components'] += int(b.get('total_sp_components') or 0)
+        if b.get('age'): dist_data[d]['avg_age'].append(int(b['age']))
+
+    dist_df = pd.DataFrame([{
+        'District': d,
+        'Buildings': v['buildings'],
+        'Init Devices': v['init_devices'],
+        'SP Components': v['sp_components'],
+        'Avg Age': f"{sum(v['avg_age'])/len(v['avg_age']):.1f}" if v['avg_age'] else '—',
+    } for d, v in sorted(dist_data.items(), key=lambda x: -x[1]['buildings'])])
+    st.dataframe(dist_df, use_container_width=True, hide_index=True)
+
+    # ── Devices by Type ───────────────────────────────────────────────────
+    st.markdown('<div class="section-title">Device Counts by Type (Campus-Wide)</div>', unsafe_allow_html=True)
+    dev_types = {}
+    for b in all_buildings:
+        for key, label in [('smoke','Smoke'), ('heat','Heat'), ('pull','Pull Station'),
+                           ('duct','Duct'), ('init_devices','Init (Total)'),
+                           ('notif_devices','Notif (Total)'), ('transponders','Transponders')]:
+            v = int(b.get(key) or 0)
+            dev_types[label] = dev_types.get(label, 0) + v
+
+    if dev_types:
+        sorted_devs = sorted(dev_types.items(), key=lambda x: -x[1])
+        fig_dev = go.Figure(go.Bar(
+            x=[d[0] for d in sorted_devs],
+            y=[d[1] for d in sorted_devs],
+            marker_color='#CC2929',
+            text=[f"{d[1]:,}" for d in sorted_devs],
+            textposition='outside'))
+        fig_dev.update_layout(height=300, margin=dict(l=0,r=0,t=20,b=0),
+                              plot_bgcolor='white', paper_bgcolor='white',
+                              yaxis=dict(showgrid=True, gridcolor='#f0f0f0'))
+        st.plotly_chart(fig_dev, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPORT REPORTS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "📥  Export Reports":
+    render_header("Export Reports", "Download inspection data as Excel spreadsheets")
+
+    st.markdown("### Choose what to export")
+
+    ex1, ex2 = st.columns(2)
+
+    with ex1:
+        st.markdown("**🔥 Fire Alarm**")
+
+        # FA inspection summary export
+        if st.button("📥 Export FA Inspection History", use_container_width=True, type="primary"):
+            inspections = db.get_inspections()
+            if inspections:
+                export_rows = []
+                for insp in inspections:
+                    raw = insp.get('deficiencies') or '[]'
+                    if isinstance(raw, list): defs = raw
+                    else:
+                        try: defs = json.loads(raw)
+                        except: defs = []
+                    export_rows.append({
+                        'Building #': insp.get('bldg_num',''),
+                        'Building Name': insp.get('building_name',''),
+                        'District': insp.get('district',''),
+                        'Date': insp.get('inspection_date',''),
+                        'Type': insp.get('inspection_type',''),
+                        'Result': insp.get('result',''),
+                        '% Tested': insp.get('pct_tested',0),
+                        'Inspector': insp.get('inspector_name',''),
+                        'Work Order': insp.get('work_order',''),
+                        'Deficiencies': len(defs),
+                        'PS Total': insp.get('ps_total',0), 'PS Tested': insp.get('ps_tested',0),
+                        'SD Total': insp.get('sd_total',0), 'SD Tested': insp.get('sd_tested',0),
+                        'HD Total': insp.get('hd_total',0), 'HD Tested': insp.get('hd_tested',0),
+                        'DD Total': insp.get('dd_total',0), 'DD Tested': insp.get('dd_tested',0),
+                        'Notes': insp.get('notes',''),
+                    })
+                export_df = pd.DataFrame(export_rows)
+                import io
+                buf = io.BytesIO()
+                export_df.to_excel(buf, index=False, sheet_name='FA Inspections')
+                st.download_button("⬇️ Download FA Inspections.xlsx", data=buf.getvalue(),
+                                   file_name=f"FA_Inspections_{date.today().isoformat()}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("No FA inspections to export.")
+
+        # FA schedule export
+        if st.button("📥 Export FA Schedule", use_container_width=True):
+            schedule = db.get_schedule()
+            if schedule:
+                sched_df = pd.DataFrame([{
+                    'Building #': s.get('bldg_num',''),
+                    'Building': s.get('building_name',''),
+                    'Month': s.get('month',''),
+                    'Status': s.get('status',''),
+                    'District': s.get('district',''),
+                    'Est Hours': s.get('est_hours',''),
+                    'Date Completed': s.get('date_completed',''),
+                    'Uploaded CMS': s.get('uploaded_cms',''),
+                    'Notes': s.get('notes',''),
+                } for s in schedule])
+                import io
+                buf = io.BytesIO()
+                sched_df.to_excel(buf, index=False, sheet_name='FA Schedule')
+                st.download_button("⬇️ Download FA Schedule.xlsx", data=buf.getvalue(),
+                                   file_name=f"FA_Schedule_{date.today().isoformat()}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("No schedule data to export.")
+
+    with ex2:
+        st.markdown("**🚿 Sprinkler**")
+
+        # SP inspection history export
+        if st.button("📥 Export SP Inspection History", use_container_width=True, type="primary"):
+            sp_inspections = dbs.get_sprinkler_inspections()
+            if sp_inspections:
+                sp_rows = []
+                for insp in sp_inspections:
+                    items = dbs.get_sprinkler_inspection_items(insp['id'])
+                    n_pass = sum(1 for it in (items or []) if it.get('status') == 'Pass')
+                    n_crit = sum(1 for it in (items or []) if it.get('status') in ('Critical','Non Critical','Impairment'))
+                    sp_rows.append({
+                        'Building #': insp.get('bldg_num',''),
+                        'Building': insp.get('bldg_name',''),
+                        'Date': insp.get('inspection_date',''),
+                        'Frequency': insp.get('freq_type',''),
+                        'Result': insp.get('overall_result',''),
+                        'Inspector': insp.get('inspector_name',''),
+                        'Items Total': len(items or []),
+                        'Pass': n_pass,
+                        'Deficiencies': n_crit,
+                        'Notes': insp.get('notes',''),
+                    })
+                sp_df = pd.DataFrame(sp_rows)
+                import io
+                buf = io.BytesIO()
+                sp_df.to_excel(buf, index=False, sheet_name='SP Inspections')
+                st.download_button("⬇️ Download SP Inspections.xlsx", data=buf.getvalue(),
+                                   file_name=f"SP_Inspections_{date.today().isoformat()}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("No SP inspections to export.")
+
+        # SP schedule export
+        if st.button("📥 Export SP Schedule", use_container_width=True):
+            sp_sched = dbs.get_sprinkler_schedule()
+            if sp_sched:
+                sp_sched_df = pd.DataFrame([{
+                    'Building #': s.get('bldg_num',''),
+                    'Month': s.get('month',''),
+                    'Frequency': s.get('freq_type',''),
+                    'Status': s.get('status',''),
+                    'Date Completed': s.get('date_completed',''),
+                    'Notes': s.get('notes',''),
+                } for s in sp_sched])
+                import io
+                buf = io.BytesIO()
+                sp_sched_df.to_excel(buf, index=False, sheet_name='SP Schedule')
+                st.download_button("⬇️ Download SP Schedule.xlsx", data=buf.getvalue(),
+                                   file_name=f"SP_Schedule_{date.today().isoformat()}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            else:
+                st.info("No SP schedule data to export.")
+
+    # Combined deficiency export
+    st.divider()
+    st.markdown("**⚠️ Combined Deficiency Report**")
+    if st.button("📥 Export All Deficiencies", use_container_width=True, type="primary"):
+        all_inspections = db.get_inspections()
+        all_sp_inspections = dbs.get_sprinkler_inspections()
+        def_rows = []
+        for insp in (all_inspections or []):
+            raw = insp.get('deficiencies') or '[]'
+            if isinstance(raw, list): defs = raw
+            else:
+                try: defs = json.loads(raw)
+                except: defs = []
+            for d in defs:
+                def_rows.append({
+                    'Source': 'Fire Alarm',
+                    'Building #': insp.get('bldg_num',''),
+                    'Building': insp.get('building_name',''),
+                    'Date Found': insp.get('inspection_date',''),
+                    'Device': d.get('device',''),
+                    'Location': d.get('location',''),
+                    'Issue': d.get('issue',''),
+                    'Part #': d.get('part',''),
+                    'Corrected': d.get('corrected','No'),
+                    'Inspector': insp.get('inspector_name',''),
+                })
+        for insp in (all_sp_inspections or []):
+            items = dbs.get_sprinkler_inspection_items(insp['id'])
+            for it in (items or []):
+                if it.get('status') in ('Critical','Non Critical','Impairment'):
+                    def_rows.append({
+                        'Source': 'Sprinkler',
+                        'Building #': insp.get('bldg_num',''),
+                        'Building': insp.get('bldg_name',''),
+                        'Date Found': insp.get('inspection_date',''),
+                        'Device': it.get('component',''),
+                        'Location': f"{it.get('floor','')} {it.get('room','')}".strip(),
+                        'Issue': f"{it.get('status','')} — {it.get('comments','')}",
+                        'Part #': '',
+                        'Corrected': 'No',
+                        'Inspector': insp.get('inspector_name',''),
+                    })
+        if def_rows:
+            def_df = pd.DataFrame(def_rows)
+            import io
+            buf = io.BytesIO()
+            def_df.to_excel(buf, index=False, sheet_name='Deficiencies')
+            st.download_button("⬇️ Download Deficiencies.xlsx", data=buf.getvalue(),
+                               file_name=f"All_Deficiencies_{date.today().isoformat()}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.success("No deficiencies found across all inspections. 🎉")
+
+    # Building master export
+    st.divider()
+    st.markdown("**🏛️ Building Master List**")
+    if st.button("📥 Export Building Master List", use_container_width=True):
+        all_b = dbm.get_master_buildings()
+        if all_b:
+            bldg_df = pd.DataFrame([{
+                'Building #': b.get('bldg_num',''),
+                'Name': b.get('name',''),
+                'District': b.get('district',''),
+                'Address': b.get('address',''),
+                'Panel Type': b.get('panel_type',''),
+                'Year Installed': b.get('year_installed',''),
+                'Age': b.get('age',''),
+                'Inspection Month': b.get('inspection_month',''),
+                'Init Devices': b.get('init_devices',''),
+                'Notif Devices': b.get('notif_devices',''),
+                'Smoke': b.get('smoke',''),
+                'Heat': b.get('heat',''),
+                'Pull': b.get('pull',''),
+                'Duct': b.get('duct',''),
+                'SP Components': b.get('total_sp_components',''),
+                'Gateway IP': b.get('gateway_ip',''),
+                'FocalPoint': b.get('focalpoint_name',''),
+            } for b in dbm.sort_buildings(all_b)])
+            import io
+            buf = io.BytesIO()
+            bldg_df.to_excel(buf, index=False, sheet_name='Buildings')
+            st.download_button("⬇️ Download Buildings.xlsx", data=buf.getvalue(),
+                               file_name=f"Building_Master_{date.today().isoformat()}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 elif page == "🖨️  Print Report":
