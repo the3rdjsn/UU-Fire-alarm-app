@@ -2762,120 +2762,211 @@ elif page == "🗺️  Campus Map":
 
     # Get schedule status for each building
     fa_schedule = db.get_schedule()
-    sp_schedule = dbs.get_sprinkler_schedule()
 
-    # Build status lookup: bldg_num → status
+    # Build status lookup: bldg_num → worst status
     bldg_status = {}
     for s in fa_schedule:
         bn = str(s.get('bldg_num','')).split('.')[0]
         status = s.get('status','Pending')
-        # Worst status wins: Overdue > In Progress > Pending > Complete
         rank = {'Overdue':0, 'In Progress':1, 'Pending':2, 'Construction':3, 'Complete':4}
         if bn not in bldg_status or rank.get(status,5) < rank.get(bldg_status[bn],5):
             bldg_status[bn] = status
 
-    # Color mapping
     status_colors = {
-        'Complete': '#22c55e',
-        'In Progress': '#3b82f6',
-        'Pending': '#f59e0b',
-        'Overdue': '#ef4444',
-        'Construction': '#8b5cf6',
+        'Complete': '#22c55e', 'In Progress': '#3b82f6',
+        'Pending': '#f59e0b', 'Overdue': '#ef4444', 'Construction': '#8b5cf6',
     }
 
     # Filter
-    map_filter = st.selectbox("Filter by Status", ['All','Complete','Overdue','Pending','In Progress','Construction'], key='map_filter')
+    map_filter = st.selectbox("Filter by Status",
+        ['All','Complete','Overdue','Pending','In Progress','Construction'], key='map_filter')
 
-    # Build scatter data — use UofU campus coords as base
-    # Center: 40.7649, -111.8421 (UofU campus)
-    import random
-    random.seed(42)
+    # ── Geocode buildings from address ────────────────────────────────────
+    # Use session_state to cache geocoded coordinates
+    import urllib.request, urllib.parse
+    import time as _time
 
-    map_data = []
-    for b in all_buildings:
-        bn = str(b.get('bldg_num',''))
-        status = bldg_status.get(bn, 'Pending')
-        if map_filter != 'All' and status != map_filter:
-            continue
+    @st.cache_data(ttl=86400, show_spinner="Geocoding building addresses…")
+    def _geocode_buildings(building_data_hash):
+        """Geocode all buildings using Nominatim. Cached for 24h."""
+        coords = {}
+        for b in all_buildings:
+            bn = str(b.get('bldg_num',''))
+            addr = b.get('address','')
+            city = b.get('city','Salt Lake City')
+            state = b.get('state','UT')
+            zipcode = b.get('zip','84112')
 
-        # Generate deterministic coordinates based on bldg_num hash
-        h = hash(bn)
-        lat = 40.7649 + (h % 1000 - 500) / 10000.0
-        lon = -111.8421 + ((h >> 10) % 1000 - 500) / 10000.0
+            if not addr or not addr.strip():
+                continue
 
-        sp_count = int(b.get('total_sp_components') or 0)
-        name = b.get('name','') or f"Building {bn}"
-        district = b.get('district','')
-        panel = b.get('panel_type','')
+            query = f"{addr}, {city}, {state} {zipcode}"
+            try:
+                url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode({
+                    'q': query, 'format': 'json', 'limit': 1,
+                    'viewbox': '-111.87,-111.82,40.74,40.79',  # UofU bounding box
+                    'bounded': 0,
+                })
+                req = urllib.request.Request(url, headers={'User-Agent': 'UU-FireSystems/1.0'})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read())
+                if data:
+                    coords[bn] = {
+                        'lat': float(data[0]['lat']),
+                        'lon': float(data[0]['lon']),
+                    }
+                _time.sleep(1.1)  # Nominatim rate limit: 1 req/sec
+            except:
+                pass
+        return coords
 
-        map_data.append({
-            'bldg_num': bn, 'name': name, 'lat': lat, 'lon': lon,
-            'status': status, 'color': status_colors.get(status, '#888'),
-            'district': district, 'panel': panel,
-            'has_sprinkler': '🚿' if sp_count > 0 else '',
-            'hover': f"#{bn} {name} | {district} | {panel} | {status}",
-        })
+    # Build a stable hash from building addresses to cache against
+    _addr_hash = hash(tuple(
+        (b.get('bldg_num',''), b.get('address',''))
+        for b in all_buildings if b.get('address')
+    ))
 
-    if map_data:
-        df_map = pd.DataFrame(map_data)
+    # Show two tabs: Map view + List view with campus map links
+    tab_map, tab_list = st.tabs(["🗺️ Map View", "📋 List + Campus Map Links"])
 
-        # Summary row
+    with tab_list:
+        # This always works — no geocoding needed
+        st.markdown("Click any building number to open it on the **official UofU campus map**.")
+        map_data_list = []
+        for b in all_buildings:
+            bn = str(b.get('bldg_num',''))
+            status = bldg_status.get(bn, 'Pending')
+            if map_filter != 'All' and status != map_filter:
+                continue
+            name = b.get('name','') or f"Building {bn}"
+            map_data_list.append({
+                'bldg_num': bn, 'name': name,
+                'district': b.get('district',''),
+                'panel': b.get('panel_type',''),
+                'status': status,
+                'address': b.get('address',''),
+                'sp': '🚿' if int(b.get('total_sp_components') or 0) > 0 else '',
+                'map_link': f"https://map.utah.edu/?buildingnumber={bn}",
+            })
+
+        # Summary
         mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-        mc1.metric("Total on Map", len(df_map))
-        mc2.metric("✅ Complete", len(df_map[df_map['status']=='Complete']))
-        mc3.metric("🔴 Overdue", len(df_map[df_map['status']=='Overdue']))
-        mc4.metric("🟡 Pending", len(df_map[df_map['status']=='Pending']))
-        mc5.metric("🔵 In Progress", len(df_map[df_map['status']=='In Progress']))
+        mc1.metric("Total", len(map_data_list))
+        mc2.metric("✅ Complete", sum(1 for d in map_data_list if d['status']=='Complete'))
+        mc3.metric("🔴 Overdue", sum(1 for d in map_data_list if d['status']=='Overdue'))
+        mc4.metric("🟡 Pending", sum(1 for d in map_data_list if d['status']=='Pending'))
+        mc5.metric("🔵 In Progress", sum(1 for d in map_data_list if d['status']=='In Progress'))
 
-        # Plotly scatter mapbox
-        fig = px.scatter_mapbox(
-            df_map, lat='lat', lon='lon',
-            color='status',
-            color_discrete_map=status_colors,
-            hover_name='name',
-            hover_data={'bldg_num':True, 'district':True, 'panel':True, 'status':True,
-                        'lat':False, 'lon':False, 'color':False, 'hover':False, 'has_sprinkler':True},
-            size_max=15,
-            zoom=14.5,
-            center={'lat': 40.7649, 'lon': -111.8421},
-            mapbox_style='open-street-map',
-            height=620,
-        )
-        fig.update_traces(marker=dict(size=12, opacity=0.85))
-        fig.update_layout(margin=dict(l=0,r=0,t=0,b=0),
-                          legend=dict(orientation='h', y=-0.05, font=dict(size=12)))
+        for d in map_data_list:
+            color = status_colors.get(d['status'], '#888')
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:12px;padding:8px 12px;'
+                f'border-left:4px solid {color};background:#f9f9f9;border-radius:0 6px 6px 0;margin:4px 0">'
+                f'<a href="{d["map_link"]}" target="_blank" style="font-weight:800;color:#CC2929;'
+                f'font-size:14px;text-decoration:none">#{d["bldg_num"]}</a>'
+                f'<span style="flex:1;font-weight:600">{d["name"]}</span>'
+                f'<span style="color:#888;font-size:12px">{d["district"]}</span>'
+                f'<span style="color:#888;font-size:12px">{d["panel"]}</span>'
+                f'<span style="font-size:12px">{d["sp"]}</span>'
+                f'<span style="background:{color};color:white;padding:2px 8px;border-radius:12px;'
+                f'font-size:11px;font-weight:700">{d["status"]}</span>'
+                f'</div>', unsafe_allow_html=True)
 
-        selected = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="campus_map")
+    with tab_map:
+        st.info("🌐 Geocoding addresses via OpenStreetMap — first load may take a few minutes. Results are cached for 24 hours.")
 
-        # If a point is clicked, show building detail
-        if selected and selected.get("selection",{}).get("points"):
-            pt = selected["selection"]["points"][0]
-            idx = pt.get("point_index", 0)
-            if idx < len(df_map):
-                clicked = df_map.iloc[idx]
-                st.divider()
-                st.markdown(f"### #{clicked['bldg_num']} — {clicked['name']}")
-                ic1, ic2, ic3, ic4 = st.columns(4)
-                ic1.write(f"**District:** {clicked['district']}")
-                ic2.write(f"**Panel:** {clicked['panel']}")
-                ic3.write(f"**Status:** {clicked['status']}")
-                ic4.write(f"**Sprinkler:** {'Yes' if clicked['has_sprinkler'] else 'No'}")
+        with st.spinner("Geocoding building addresses from OpenStreetMap…"):
+            coords = _geocode_buildings(_addr_hash)
 
-                bc1, bc2 = st.columns(2)
-                with bc1:
-                    if st.button("🏛️ View Building Details", key=f"map_bldg_{clicked['bldg_num']}", type="primary"):
-                        st.session_state['mb_detail_sel'] = f"{clicked['bldg_num']} — {clicked['name']}"
-                        st.session_state['nav_target'] = '🏛️  Buildings'
-                        st.rerun()
-                with bc2:
-                    if st.button("📋 Start Inspection", key=f"map_insp_{clicked['bldg_num']}"):
-                        st.session_state['prefill_bldg'] = clicked['bldg_num']
-                        st.session_state['nav_target'] = '📋  New Inspection'
-                        st.rerun()
-    else:
-        st.info("No buildings match the selected filter.")
+        if not coords:
+            st.warning("No addresses could be geocoded. Make sure buildings have street addresses in the database.")
+            st.stop()
 
-    # Legend / district summary
+        st.success(f"📍 {len(coords)} of {len(all_buildings)} buildings geocoded from their addresses.")
+
+        map_data = []
+        for b in all_buildings:
+            bn = str(b.get('bldg_num',''))
+            if bn not in coords:
+                continue
+            status = bldg_status.get(bn, 'Pending')
+            if map_filter != 'All' and status != map_filter:
+                continue
+
+            c = coords[bn]
+            name = b.get('name','') or f"Building {bn}"
+            map_data.append({
+                'bldg_num': bn, 'name': name,
+                'lat': c['lat'], 'lon': c['lon'],
+                'status': status, 'color': status_colors.get(status, '#888'),
+                'district': b.get('district',''),
+                'panel': b.get('panel_type',''),
+                'has_sprinkler': '🚿' if int(b.get('total_sp_components') or 0) > 0 else '',
+            })
+
+        if map_data:
+            df_map = pd.DataFrame(map_data)
+
+            # Summary row
+            mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+            mc1.metric("On Map", len(df_map))
+            mc2.metric("✅ Complete", len(df_map[df_map['status']=='Complete']))
+            mc3.metric("🔴 Overdue", len(df_map[df_map['status']=='Overdue']))
+            mc4.metric("🟡 Pending", len(df_map[df_map['status']=='Pending']))
+            mc5.metric("🔵 In Progress", len(df_map[df_map['status']=='In Progress']))
+
+            # Center on average of geocoded points
+            center_lat = df_map['lat'].mean()
+            center_lon = df_map['lon'].mean()
+
+            fig = px.scatter_mapbox(
+                df_map, lat='lat', lon='lon',
+                color='status',
+                color_discrete_map=status_colors,
+                hover_name='name',
+                hover_data={'bldg_num':True, 'district':True, 'panel':True, 'status':True,
+                            'lat':False, 'lon':False, 'color':False, 'has_sprinkler':True},
+                size_max=15,
+                zoom=14,
+                center={'lat': center_lat, 'lon': center_lon},
+                mapbox_style='open-street-map',
+                height=620,
+            )
+            fig.update_traces(marker=dict(size=12, opacity=0.85))
+            fig.update_layout(margin=dict(l=0,r=0,t=0,b=0),
+                              legend=dict(orientation='h', y=-0.05, font=dict(size=12)))
+
+            selected = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="campus_map")
+
+            # Click handler
+            if selected and selected.get("selection",{}).get("points"):
+                pt = selected["selection"]["points"][0]
+                idx = pt.get("point_index", 0)
+                if idx < len(df_map):
+                    clicked = df_map.iloc[idx]
+                    st.divider()
+                    st.markdown(f"### #{clicked['bldg_num']} — {clicked['name']}")
+                    ic1, ic2, ic3, ic4 = st.columns(4)
+                    ic1.write(f"**District:** {clicked['district']}")
+                    ic2.write(f"**Panel:** {clicked['panel']}")
+                    ic3.write(f"**Status:** {clicked['status']}")
+                    ic4.markdown(f"[🌐 Open on Campus Map](https://map.utah.edu/?buildingnumber={clicked['bldg_num']})")
+
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        if st.button("🏛️ View Building Details", key=f"map_bldg_{clicked['bldg_num']}", type="primary"):
+                            st.session_state['mb_detail_sel'] = f"{clicked['bldg_num']} — {clicked['name']}"
+                            st.session_state['nav_target'] = '🏛️  Buildings'
+                            st.rerun()
+                    with bc2:
+                        if st.button("📋 Start Inspection", key=f"map_insp_{clicked['bldg_num']}"):
+                            st.session_state['prefill_bldg'] = clicked['bldg_num']
+                            st.session_state['nav_target'] = '📋  New Inspection'
+                            st.rerun()
+        else:
+            st.info("No buildings match the selected filter.")
+
+    # District summary
     st.divider()
     st.markdown("**Buildings by District**")
     dist_counts = {}
