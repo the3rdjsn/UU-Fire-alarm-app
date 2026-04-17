@@ -198,3 +198,31 @@ def get_all_component_images(bldg_num, riser_folder):
         return paths
     except:
         return []
+
+# ── Add / Import Buildings ────────────────────────────────────────────────────
+
+def add_building(fields: dict):
+    """Insert a single new building. Returns inserted row or None."""
+    if not _use_supabase(): return None
+    try:
+        res = _sb().table("master_buildings").insert(fields).execute()
+        return (res.data or [None])[0]
+    except Exception as e:
+        print("add_building error:", e); return None
+
+def import_buildings(rows: list):
+    """Bulk insert list of building dicts. Returns (inserted_count, errors)."""
+    if not _use_supabase(): return 0, []
+    errors = []
+    inserted = 0
+    import re
+    def safe_col(name):
+        return 'sp_' + re.sub(r'[^a-zA-Z0-9_]', '_', name).lower()
+    for i in range(0, len(rows), 50):
+        batch = rows[i:i+50]
+        try:
+            _sb().table("master_buildings").upsert(batch, on_conflict="bldg_num").execute()
+            inserted += len(batch)
+        except Exception as e:
+            errors.append(str(e))
+    return inserted, errors

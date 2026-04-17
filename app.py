@@ -229,18 +229,21 @@ with st.sidebar:
         "📊  Dashboard",
         # Buildings (unified)
         "🏛️  Buildings",
+        "➕  Add / Import Buildings",
         # Fire Alarm
         "🔥  ─── Fire Alarm ───",
         "📅  Schedule",
         "📋  New Inspection",
         "📁  Inspection History",
         "🔍  Device Inventory",
+        "➕  Add / Import FA Devices",
         # Sprinkler
         "🚿  ─── Sprinkler ───",
         "📅  SP Schedule",
         "📋  SP New Inspection",
         "📁  SP Inspection History",
         "🔧  SP Component Inventory",
+        "➕  Add / Import SP Components",
         # Print
         "🖨️  ─── Print ───",
         "🖨️  Print Report",
@@ -516,8 +519,7 @@ if page == "🏛️  Buildings":
 
                         if sel_comp and sel_comp != "— Select —":
                             # Find matching inventory rows for this building + component
-                            inv_rows = dbs.get_inventory_for_building(
-                                b.get('focalpoint_name',''), b.get('name',''))
+                            inv_rows = dbs.get_inventory_for_building(sel_num)
                             matching = [r for r in inv_rows if r.get('component') == sel_comp]
 
                             if matching:
@@ -2123,6 +2125,375 @@ elif page == "🔧  SP Component Inventory":
                 st.dataframe(sc, use_container_width=True, hide_index=True, height=250)
 
     _inventory_tab()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADD / IMPORT BUILDINGS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "➕  Add / Import Buildings":
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>Add / Import Buildings</h1>
+          <p>Add a single building or bulk import from Excel / CSV</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+
+    tab_single, tab_import = st.tabs(["➕ Add Single Building", "📥 Bulk Import"])
+
+    with tab_single:
+        st.markdown("### New Building")
+        with st.form("add_bldg_form"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                nb_num   = st.text_input("Building Number *", placeholder="e.g. 200")
+                nb_name  = st.text_input("Building Name *", placeholder="e.g. Marriott Library")
+                nb_addr  = st.text_input("Street Address")
+                nb_city  = st.text_input("City", value="Salt Lake City")
+                nb_state = st.text_input("State", value="UT")
+                nb_zip   = st.text_input("Zip", value="84112")
+            with c2:
+                nb_dist  = st.text_input("District FA", placeholder="e.g. PRESIDENTS")
+                nb_panel = st.text_input("Panel Type", placeholder="e.g. E-3 VOICE")
+                nb_month = st.selectbox("Inspection Month", ["","January","February","March","April","May","June","July","August","September","October","November","December"])
+                nb_yr    = st.number_input("Year Installed", min_value=1970, max_value=2030, value=2010, step=1)
+                nb_sqft  = st.number_input("Sq Ft", min_value=0, value=0, step=100)
+                nb_resp  = st.selectbox("Responsibility", ["Campus","Hospital","Research Park","Other"])
+            with c3:
+                nb_fp    = st.text_input("FocalPoint Name", placeholder="e.g. 200 LIBRARY")
+                nb_gw_ip = st.text_input("Gateway IP")
+                nb_anx   = st.text_input("ANX IP")
+                nb_vlan  = st.text_input("VLAN")
+                nb_aux   = st.selectbox("Auxiliary Panel", ["No","Yes"])
+                nb_riser = st.text_input("Riser Folder", placeholder="e.g. District1_Presidents")
+
+            if st.form_submit_button("💾 Add Building", type="primary"):
+                if not nb_num or not nb_name:
+                    st.error("Building Number and Name are required.")
+                else:
+                    fields = {
+                        'bldg_num': nb_num.strip(), 'name': nb_name.strip(),
+                        'address': nb_addr, 'city': nb_city, 'state': nb_state, 'zip': nb_zip,
+                        'district': nb_dist.upper() if nb_dist else '',
+                        'panel_type': nb_panel, 'inspection_month': nb_month,
+                        'year_installed': int(nb_yr) if nb_yr else None,
+                        'sq_ft': int(nb_sqft) if nb_sqft else None,
+                        'responsibility': nb_resp, 'focalpoint_name': nb_fp,
+                        'gateway_ip': nb_gw_ip, 'anx_ip': nb_anx, 'vlan': nb_vlan,
+                        'aux': nb_aux, 'riser_folder': nb_riser,
+                    }
+                    result = dbm.add_building(fields)
+                    if result:
+                        st.success(f"✅ Building {nb_num} — {nb_name} added successfully!")
+                        st.cache_data.clear()
+                    else:
+                        st.error("Failed to add building. Check that building number is unique.")
+
+    with tab_import:
+        st.markdown("### Bulk Import from Excel / CSV")
+        st.info("""**Expected columns** (column names must match exactly):
+        `Building Number`, `Building Name_Bldg`, `District FA`, `Panel Type`, `Inspection Month`,
+        `Street Address`, `City`, `State`, `Zip`, `Gross Sq Ft`, `Year Installed`,
+        `Gateway Ip Addresses`, `Anx Ip Addresses`, `Vlan`, `FocalPoint Name`, `Riser Inventory Folder`
+        
+        Extra columns are ignored. Use the Master_Building_Sheet as a template.""")
+
+        up_file = st.file_uploader("Upload Excel (.xlsx) or CSV (.csv)", type=["xlsx","csv"],
+                                    key="bldg_import_file")
+        overwrite = st.checkbox("Overwrite existing buildings with same Building Number", value=False)
+
+        if up_file:
+            try:
+                if up_file.name.endswith('.csv'):
+                    df_imp = pd.read_csv(up_file)
+                else:
+                    df_imp = pd.read_excel(up_file)
+
+                st.write(f"**Preview:** {len(df_imp)} rows, {len(df_imp.columns)} columns")
+                st.dataframe(df_imp.head(5), use_container_width=True, hide_index=True)
+
+                # Column mapping
+                col_map = {
+                    'Building Number': 'bldg_num', 'Building Name_Bldg': 'name',
+                    'District FA': 'district', 'Panel Type': 'panel_type',
+                    'Inspection Month': 'inspection_month', 'Street Address': 'address',
+                    'City': 'city', 'State': 'state', 'Zip': 'zip',
+                    'Gross Sq Ft': 'sq_ft', 'Year Installed': 'year_installed',
+                    'Gateway Ip Addresses': 'gateway_ip', 'Anx Ip Addresses': 'anx_ip',
+                    'Vlan': 'vlan', 'FocalPoint Name': 'focalpoint_name',
+                    'Riser Inventory Folder': 'riser_folder',
+                }
+                matched = {k: v for k, v in col_map.items() if k in df_imp.columns}
+                st.write(f"**Matched columns:** {list(matched.values())}")
+
+                if st.button("📥 Import Buildings", type="primary"):
+                    rows = []
+                    for _, row in df_imp.iterrows():
+                        r = {}
+                        for src, dst in matched.items():
+                            v = row.get(src)
+                            if pd.isna(v): v = None
+                            if dst == 'bldg_num': v = str(int(float(v))) if v else None
+                            if dst == 'district' and v: v = str(v).upper()
+                            r[dst] = v
+                        if r.get('bldg_num'):
+                            rows.append(r)
+                    if rows:
+                        inserted, errors = dbm.import_buildings(rows)
+                        if inserted:
+                            st.success(f"✅ {inserted} buildings imported successfully!")
+                            st.cache_data.clear()
+                        if errors:
+                            st.error(f"Errors: {errors}")
+                    else:
+                        st.warning("No valid rows found — check Building Number column exists and has values.")
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADD / IMPORT FA DEVICES
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "➕  Add / Import FA Devices":
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>Add / Import Fire Alarm Devices</h1>
+          <p>Add a single device or bulk import from FocalPoint export</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+
+    tab_single, tab_import = st.tabs(["➕ Add Single Device", "📥 Bulk Import"])
+
+    with tab_single:
+        st.markdown("### New FA Device")
+        # Get building list from master
+        _fa_bldgs = dbm.get_master_buildings()
+        _fa_bldgs = dbm.sort_buildings(_fa_bldgs)
+        _fa_labels = [f"{b['bldg_num']} — {b.get('name','')}" for b in _fa_bldgs]
+
+        with st.form("add_fa_dev_form"):
+            dev_bldg = st.selectbox("Building *", _fa_labels, key="add_fa_bldg")
+            c1, c2 = st.columns(2)
+            with c1:
+                dev_type  = st.text_input("Device Type *", placeholder="e.g. SMOKE, PULL, HEAT, DUCT, NOTIF")
+                dev_point = st.text_input("Point / Address *", placeholder="e.g. 1-001")
+            with c2:
+                dev_desc  = st.text_input("Description", placeholder="e.g. 1st Floor Lobby")
+                dev_addr  = st.text_input("Physical Address / Location")
+
+            if st.form_submit_button("💾 Add Device", type="primary"):
+                if not dev_type or not dev_point:
+                    st.error("Device Type and Point are required.")
+                else:
+                    sel_bnum = dev_bldg.split(' — ')[0]
+                    sel_bldg = next((b for b in _fa_bldgs if b['bldg_num'] == sel_bnum), {})
+                    fields = {
+                        'building': sel_bldg.get('focalpoint_name') or sel_bldg.get('name',''),
+                        'type':     dev_type.strip().upper(),
+                        'point':    dev_point.strip(),
+                        'description': dev_desc.strip(),
+                        'address':  dev_addr.strip(),
+                    }
+                    result = db.add_device(fields)
+                    if result:
+                        st.success(f"✅ Device {dev_type} — {dev_point} added to {dev_bldg}!")
+                    else:
+                        st.error("Failed to add device.")
+
+    with tab_import:
+        st.markdown("### Bulk Import from Excel / CSV")
+        st.info("""**Expected columns:**
+        `building` (FocalPoint name), `type` (device type), `point` (address/point number), 
+        `description` (optional), `address` (optional)
+        
+        This matches the FocalPoint export format. Building must match the FocalPoint Name in the master list.""")
+
+        up_fa = st.file_uploader("Upload Excel (.xlsx) or CSV (.csv)", type=["xlsx","csv"],
+                                  key="fa_dev_import_file")
+        if up_fa:
+            try:
+                if up_fa.name.endswith('.csv'):
+                    df_fa = pd.read_csv(up_fa)
+                else:
+                    df_fa = pd.read_excel(up_fa)
+
+                st.write(f"**Preview:** {len(df_fa)} rows")
+                st.dataframe(df_fa.head(5), use_container_width=True, hide_index=True)
+
+                # Normalize column names to lowercase
+                df_fa.columns = [c.lower().strip() for c in df_fa.columns]
+                required = {'building','type','point'}
+                missing = required - set(df_fa.columns)
+                if missing:
+                    st.error(f"Missing required columns: {missing}")
+                else:
+                    if st.button("📥 Import Devices", type="primary"):
+                        rows = []
+                        for _, row in df_fa.iterrows():
+                            r = {
+                                'building':    str(row.get('building','')).strip(),
+                                'type':        str(row.get('type','')).strip().upper(),
+                                'point':       str(row.get('point','')).strip(),
+                                'description': str(row.get('description','') or '').strip(),
+                                'address':     str(row.get('address','') or '').strip(),
+                            }
+                            if r['building'] and r['type'] and r['point']:
+                                rows.append(r)
+                        if rows:
+                            inserted, errors = db.import_devices(rows)
+                            if inserted:
+                                st.success(f"✅ {inserted} devices imported!")
+                            if errors:
+                                st.error(f"Errors: {errors[:3]}")
+                        else:
+                            st.warning("No valid rows found.")
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADD / IMPORT SP COMPONENTS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "➕  Add / Import SP Components":
+    import db_sprinkler as dbs
+    st.markdown(f'''<div class="uu-header">
+        <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
+        <div style="border-left:1px solid #e5e5e5;padding-left:20px">
+          <h1>Add / Import Sprinkler Components</h1>
+          <p>Add a single component or bulk import from riser inventory export</p>
+        </div>
+    </div>''', unsafe_allow_html=True)
+
+    tab_single, tab_import = st.tabs(["➕ Add Single Component", "📥 Bulk Import"])
+
+    with tab_single:
+        st.markdown("### New Sprinkler Component")
+        _sp_bldgs = dbm.get_master_buildings()
+        _sp_bldgs = dbm.sort_buildings(_sp_bldgs)
+        _sp_labels = [f"{b['bldg_num']} — {b.get('name','')}" for b in _sp_bldgs]
+
+        with st.form("add_sp_comp_form"):
+            sp_bldg = st.selectbox("Building *", _sp_labels, key="add_sp_bldg")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                sp_floor   = st.text_input("Floor *", placeholder="e.g. Basement")
+                sp_room    = st.text_input("Room *", placeholder="e.g. Mechanical")
+            with c2:
+                sp_system  = st.text_input("System Type *", placeholder="e.g. WetSystem-0")
+                sp_comp    = st.text_input("Component *", placeholder="e.g. Waterflow")
+            with c3:
+                sp_address = st.text_input("Address / Index")
+                sp_ref     = st.text_input("NFPA Reference", placeholder="e.g. 13.2.5")
+
+            if st.form_submit_button("💾 Add Component", type="primary"):
+                if not sp_floor or not sp_system or not sp_comp:
+                    st.error("Floor, System Type, and Component are required.")
+                else:
+                    sel_bnum = sp_bldg.split(' — ')[0]
+                    fields = {
+                        'bldg_num':    sel_bnum,
+                        'floor':       sp_floor.strip(),
+                        'room':        sp_room.strip(),
+                        'system_type': sp_system.strip(),
+                        'component':   sp_comp.strip(),
+                        'address':     sp_address.strip(),
+                        'reference':   sp_ref.strip(),
+                    }
+                    result = dbs.add_sp_component(fields)
+                    if result:
+                        st.success(f"✅ {sp_comp} added to {sp_bldg} — {sp_floor} {sp_room}!")
+                    else:
+                        st.error("Failed to add component.")
+
+    with tab_import:
+        st.markdown("### Bulk Import from Excel / CSV")
+        st.info("""**Expected columns:**
+        `BUILDING` (building number), `FLOOR`, `ROOM`, `SYSTEM TYPE`, `COMPONENT`, 
+        `ADDRESS` (optional), `Reference` (optional)
+        
+        This matches the riser service log format exactly. You can also import directly
+        from the `2026_Spring_Fire_Riser_Service_Log.xlsm` (Merge1 sheet).""")
+
+        _sp_bldgs2 = dbm.get_master_buildings()
+        _sp_bldgs2 = dbm.sort_buildings(_sp_bldgs2)
+        _sp_labels2 = ["All Buildings"] + [f"{b['bldg_num']} — {b.get('name','')}" for b in _sp_bldgs2]
+
+        col_imp1, col_imp2 = st.columns([2,1])
+        with col_imp1:
+            up_sp = st.file_uploader("Upload Excel (.xlsx/.xlsm) or CSV (.csv)", 
+                                      type=["xlsx","xlsm","csv"], key="sp_comp_import_file")
+        with col_imp2:
+            clear_first = st.checkbox("Clear existing components for building(s) before import", value=False)
+            sheet_name  = st.text_input("Sheet name (Excel only)", value="Merge1")
+
+        if up_sp:
+            try:
+                import io
+                file_bytes = up_sp.read()
+                if up_sp.name.endswith('.csv'):
+                    df_sp = pd.read_csv(io.BytesIO(file_bytes))
+                else:
+                    df_sp = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+
+                st.write(f"**Preview:** {len(df_sp)} rows, {len(df_sp.columns)} columns")
+                st.dataframe(df_sp.head(5), use_container_width=True, hide_index=True)
+
+                col_map_sp = {
+                    'BUILDING': 'bldg_num', 'FLOOR': 'floor', 'ROOM': 'room',
+                    'SYSTEM TYPE': 'system_type', 'COMPONENT': 'component',
+                    'ADDRESS': 'address', 'Reference': 'reference',
+                    'INDEX': 'address',  # alternate name
+                }
+                matched_sp = {k: v for k, v in col_map_sp.items() if k in df_sp.columns}
+                missing_req = {'BUILDING','FLOOR','SYSTEM TYPE','COMPONENT'} - set(matched_sp.keys())
+                if missing_req:
+                    st.error(f"Missing required columns: {missing_req}")
+                else:
+                    st.write(f"**Matched:** {list(matched_sp.values())}")
+                    # Show unique buildings in file
+                    bldg_col = [c for c in df_sp.columns if c == 'BUILDING']
+                    if bldg_col:
+                        uniq_bldgs = sorted(df_sp['BUILDING'].dropna().unique())
+                        st.write(f"**Buildings in file:** {len(uniq_bldgs)} — {list(uniq_bldgs[:10])}")
+
+                    if st.button("📥 Import Components", type="primary"):
+                        rows_sp = []
+                        for _, row in df_sp.iterrows():
+                            r = {}
+                            for src, dst in matched_sp.items():
+                                v = row.get(src)
+                                if pd.isna(v) if isinstance(v, float) else (v is None):
+                                    v = None
+                                if dst == 'bldg_num' and v is not None:
+                                    try: v = str(int(float(v)))
+                                    except: v = str(v)
+                                r[dst] = str(v).strip() if v is not None else ''
+                            if r.get('bldg_num') and r.get('component'):
+                                rows_sp.append(r)
+
+                        if rows_sp:
+                            if clear_first:
+                                bldgs_to_clear = list(set(r['bldg_num'] for r in rows_sp))
+                                with st.spinner(f"Clearing {len(bldgs_to_clear)} buildings..."):
+                                    for bn in bldgs_to_clear:
+                                        dbs.delete_sp_components_for_building(bn)
+
+                            with st.spinner(f"Importing {len(rows_sp)} components..."):
+                                inserted_sp, errors_sp = dbs.import_sp_components(rows_sp)
+
+                            if inserted_sp:
+                                st.success(f"✅ {inserted_sp} components imported!")
+                                st.cache_data.clear()
+                            if errors_sp:
+                                st.error(f"Errors ({len(errors_sp)}): {errors_sp[0]}")
+                        else:
+                            st.warning("No valid rows found.")
+            except Exception as e:
+                import traceback
+                st.error(f"Error reading file: {e}")
+                st.code(traceback.format_exc())
+
 
 
 elif page == "🖨️  Print Report":

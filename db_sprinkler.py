@@ -243,7 +243,7 @@ def get_sprinkler_dashboard_stats():
         total    = len(buildings)
         complete = sum(1 for s in schedule if s.get('status') == 'Complete')
         overdue  = sum(1 for s in schedule
-                       if s.get('status') not in ('Complete','Construction')
+                       if s.get('status') not in ('Complete','Construction','N/A')
                        and s.get('month') in MONTHS
                        and MONTHS.index(s['month']) < cur_idx)
         quarterly_due = sum(1 for s in schedule
@@ -285,3 +285,36 @@ def get_sprinkler_dashboard_stats():
         print("get_sprinkler_dashboard_stats error:", e)
         return {"total_systems":0,"quarterly_due":0,"annual_due":0,
                 "overdue":0,"complete":0,"reports_saved":0,"by_month":[],"by_freq":[]}
+
+# ── Add / Import SP Components ────────────────────────────────────────────────
+
+def add_sp_component(fields: dict):
+    """Insert a single sprinkler inventory component. Returns inserted row or None."""
+    if not _use_supabase(): return None
+    try:
+        res = _sb().table("sprinkler_inventory").insert(fields).execute()
+        return (res.data or [None])[0]
+    except Exception as e:
+        print("add_sp_component error:", e); return None
+
+def import_sp_components(rows: list):
+    """Bulk insert sprinkler inventory rows. Returns (inserted_count, errors)."""
+    if not _use_supabase(): return 0, []
+    errors = []
+    inserted = 0
+    for i in range(0, len(rows), 500):
+        batch = rows[i:i+500]
+        try:
+            _sb().table("sprinkler_inventory").insert(batch).execute()
+            inserted += len(batch)
+        except Exception as e:
+            errors.append(str(e))
+    return inserted, errors
+
+def delete_sp_components_for_building(bldg_num):
+    """Remove all inventory rows for a building before reimport."""
+    if not _use_supabase(): return
+    try:
+        _sb().table("sprinkler_inventory").delete().eq("bldg_num", str(bldg_num)).execute()
+    except Exception as e:
+        print("delete_sp_components error:", e)

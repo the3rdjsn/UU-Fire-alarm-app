@@ -350,3 +350,28 @@ def delete_inspection(insp_id):
         _sb().table("inspections").delete().eq("id", insp_id).execute()
     except Exception as e:
         print("delete_inspection error:", e)
+
+# ── Add / Import FA Devices ───────────────────────────────────────────────────
+
+def add_device(fields: dict):
+    """Insert a single FA device. Returns inserted row or None."""
+    if not _use_supabase(): return None
+    try:
+        res = _sb().table("devices").insert(fields).execute()
+        return (res.data or [None])[0]
+    except Exception as e:
+        print("add_device error:", e); return None
+
+def import_devices(rows: list):
+    """Bulk insert FA devices. Returns (inserted_count, errors)."""
+    if not _use_supabase(): return 0, []
+    errors = []
+    inserted = 0
+    for i in range(0, len(rows), 500):
+        batch = rows[i:i+500]
+        try:
+            _sb().table("devices").insert(batch).execute()
+            inserted += len(batch)
+        except Exception as e:
+            errors.append(str(e))
+    return inserted, errors
