@@ -1997,44 +1997,51 @@ elif page == "🔧  SP Component Inventory":
             name = bldg_map.get(str(n),'')
             return f"{n} — {name}" if name else str(n)
 
-        all_bldgs   = sorted(df_all['bldg_num'].dropna().unique().tolist(),
-                             key=lambda x: (0,int(float(x))) if str(x).replace('.','').isdigit() else (1,str(x)))
-        all_floors  = sorted(df_all['floor'].dropna().unique().tolist())
-        all_systems = sorted(df_all['system_type'].dropna().unique().tolist())
-        all_comps   = sorted(df_all['component'].dropna().unique().tolist())
-
+        all_bldgs = sorted(df_all['bldg_num'].dropna().unique().tolist(),
+                           key=lambda x: (0,int(float(x))) if str(x).replace('.','').isdigit() else (1,str(x)))
         st.caption(f"{len(df_all):,} total components across {len(all_bldgs)} buildings")
 
-        r1c1, r1c2, r1c3 = st.columns([2, 1, 1])
+        # Row 1: search + building (building filters everything below)
+        r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
         with r1c1:
             inv_search = st.text_input("🔍 Free-text search", placeholder="Any field…", key='inv_search')
         with r1c2:
             inv_bldg = st.selectbox("Building", ['All'] + [_label(n) for n in all_bldgs], key='inv_bldg')
         with r1c3:
-            inv_floor = st.selectbox("Floor", ['All'] + all_floors, key='inv_floor')
-
-        r2c1, r2c2, r2c3 = st.columns([2, 2, 1])
-        with r2c1:
-            inv_system = st.selectbox("System Type", ['All'] + all_systems, key='inv_system')
-        with r2c2:
-            inv_comp = st.selectbox("Component", ['All'] + all_comps, key='inv_comp')
-        with r2c3:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔄 Reload", key='inv_reload', use_container_width=True,
                          help="Refresh from database"):
                 del st.session_state['sp_inv_df']
                 st.rerun()
 
+        # Apply building filter first so floor/system/component lists are scoped
         inv_bnum = inv_bldg.split(' — ')[0] if inv_bldg != 'All' else 'All'
-        df = df_all.copy()
-        if inv_bnum != 'All':
-            df = df[df['bldg_num'].astype(str) == str(inv_bnum)]
-        if inv_floor != 'All':
-            df = df[df['floor'] == inv_floor]
-        if inv_system != 'All':
-            df = df[df['system_type'] == inv_system]
-        if inv_comp != 'All':
-            df = df[df['component'] == inv_comp]
+        df_bldg = df_all[df_all['bldg_num'].astype(str) == str(inv_bnum)] if inv_bnum != 'All' else df_all.copy()
+
+        # Row 2: floor (scoped to building), then system (scoped to building+floor), then component
+        floors_avail  = sorted(df_bldg['floor'].dropna().unique().tolist())
+        r2c1, r2c2, r2c3 = st.columns(3)
+        with r2c1:
+            inv_floor = st.selectbox(
+                "Floor" + (f" ({len(floors_avail)})" if inv_bnum != 'All' else ""),
+                ['All'] + floors_avail, key='inv_floor')
+
+        df_floor = df_bldg[df_bldg['floor'] == inv_floor] if inv_floor != 'All' else df_bldg.copy()
+        systems_avail = sorted(df_floor['system_type'].dropna().unique().tolist())
+        with r2c2:
+            inv_system = st.selectbox(
+                "System Type" + (f" ({len(systems_avail)})" if inv_floor != 'All' else ""),
+                ['All'] + systems_avail, key='inv_system')
+
+        df_system = df_floor[df_floor['system_type'] == inv_system] if inv_system != 'All' else df_floor.copy()
+        comps_avail = sorted(df_system['component'].dropna().unique().tolist())
+        with r2c3:
+            inv_comp = st.selectbox(
+                "Component" + (f" ({len(comps_avail)})" if inv_system != 'All' else ""),
+                ['All'] + comps_avail, key='inv_comp')
+
+        # Final filtered dataframe
+        df = df_system[df_system['component'] == inv_comp] if inv_comp != 'All' else df_system.copy()
         if inv_search:
             s = inv_search.lower()
             mask = df.apply(lambda row: any(s in str(v).lower() for v in row), axis=1)
