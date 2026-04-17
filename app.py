@@ -524,18 +524,18 @@ if page == "🏛️  Buildings":
                         with open(_map_path, 'rb') as _f:
                             _pdf_b64 = _b64.b64encode(_f.read()).decode()
                         _fname = os.path.basename(_map_path)
-                        _cv1.html(f"""
-                        <button onclick="(function(){{
-                            var b64='{_pdf_b64}';
-                            var bin=atob(b64),arr=new Uint8Array(bin.length);
-                            for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-                            var blob=new Blob([arr],{{type:'application/pdf'}});
-                            window.parent.open(URL.createObjectURL(blob),'_blank');
-                        }})()" style="background:#CC2929;color:white;border:none;
-                        padding:10px 20px;border-radius:8px;font-weight:700;
-                        font-size:14px;cursor:pointer;font-family:sans-serif;width:100%">
-                        🗺️ Open Device Map — {_fname}
-                        </button>""", height=50)
+                        # Render PDF inline inside component iframe
+                        _cv1.html(f"""<!DOCTYPE html><html><body style="margin:0;padding:0">
+                        <object data="data:application/pdf;base64,{_pdf_b64}"
+                            type="application/pdf" width="100%" height="780px">
+                            <p style="padding:20px;font-family:sans-serif">
+                            PDF viewer not supported. 
+                            <a href="data:application/pdf;base64,{_pdf_b64}" 
+                               download="{_fname}">Download {_fname}</a>
+                            </p>
+                        </object>
+                        </body></html>""", height=800, scrolling=True)
+                        st.caption(f"📄 {_fname}")
                     else:
                         st.info("No device map on file for this building.")
 
@@ -2216,6 +2216,8 @@ elif page == "➕  Add / Import Buildings":
                 nb_aux   = st.selectbox("Auxiliary Panel", ["No","Yes"])
                 nb_riser = st.text_input("Riser Folder", placeholder="e.g. District1_Presidents")
 
+            nb_photo = st.file_uploader("Building Photo (optional)", type=['jpg','jpeg','png'],
+                                         key='nb_photo')
             if st.form_submit_button("💾 Add Building", type="primary"):
                 if not nb_num or not nb_name:
                     st.error("Building Number and Name are required.")
@@ -2231,6 +2233,11 @@ elif page == "➕  Add / Import Buildings":
                         'gateway_ip': nb_gw_ip, 'anx_ip': nb_anx, 'vlan': nb_vlan,
                         'aux': nb_aux, 'riser_folder': nb_riser,
                     }
+                    if nb_photo:
+                        import base64 as _b64
+                        ext = nb_photo.name.rsplit('.',1)[-1].lower()
+                        fields['image_data'] = _b64.b64encode(nb_photo.read()).decode()
+                        fields['image_ext'] = ext
                     result = dbm.add_building(fields)
                     if result:
                         st.success(f"✅ Building {nb_num} — {nb_name} added successfully!")
@@ -2240,6 +2247,11 @@ elif page == "➕  Add / Import Buildings":
 
     with tab_import:
         st.markdown("### Bulk Import from Excel / CSV")
+        # Template download
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Buildings_Import_Template.xlsx'), 'rb') as _tf:
+            st.download_button("⬇️ Download Import Template (.xlsx)",
+                data=_tf.read(), file_name="Buildings_Import_Template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.info("""**Expected columns** (column names must match exactly):
         `Building Number`, `Building Name_Bldg`, `District FA`, `Panel Type`, `Inspection Month`,
         `Street Address`, `City`, `State`, `Zip`, `Gross Sq Ft`, `Year Installed`,
@@ -2352,6 +2364,11 @@ elif page == "➕  Add / Import FA Devices":
 
     with tab_import:
         st.markdown("### Bulk Import from Excel / CSV")
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'FA_Devices_Import_Template.xlsx'), 'rb') as _tf:
+            st.download_button("⬇️ Download Import Template (.xlsx)",
+                data=_tf.read(), file_name="FA_Devices_Import_Template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key='fa_tmpl_dl')
         st.info("""**Expected columns:**
         `building` (FocalPoint name), `type` (device type), `point` (address/point number), 
         `description` (optional), `address` (optional)
@@ -2435,6 +2452,8 @@ elif page == "➕  Add / Import SP Components":
                 sp_address = st.text_input("Address / Index")
                 sp_ref     = st.text_input("NFPA Reference", placeholder="e.g. 13.2.5")
 
+            sp_photo = st.file_uploader("Component Photo (optional)", type=['jpg','jpeg','png'],
+                                         key='sp_comp_photo')
             if st.form_submit_button("💾 Add Component", type="primary"):
                 if not sp_floor or not sp_system or not sp_comp:
                     st.error("Floor, System Type, and Component are required.")
@@ -2452,11 +2471,37 @@ elif page == "➕  Add / Import SP Components":
                     result = dbs.add_sp_component(fields)
                     if result:
                         st.success(f"✅ {sp_comp} added to {sp_bldg} — {sp_floor} {sp_room}!")
+                        # Save photo to GitHub images folder path if provided
+                        if sp_photo:
+                            import base64 as _b64
+                            _mb_sp = dbm.get_master_building(sel_bnum)
+                            _riser = _mb_sp.get('riser_folder','') if _mb_sp else ''
+                            if _riser:
+                                _img_dir = os.path.join(
+                                    os.path.dirname(os.path.abspath(__file__)),
+                                    "images", "Riser Inventory Pictures",
+                                    _riser, sel_bnum,
+                                    f"{sp_floor.strip()} {sp_room.strip()}")
+                                os.makedirs(_img_dir, exist_ok=True)
+                                _ext = sp_photo.name.rsplit('.',1)[-1].lower()
+                                _img_name = f"{sel_bnum} {sp_floor.strip()} {sp_room.strip()} {sp_system.strip()} {sp_comp.strip()}.{_ext}"
+                                _img_path = os.path.join(_img_dir, _img_name)
+                                with open(_img_path, 'wb') as _f:
+                                    _f.write(sp_photo.read())
+                                dbm.clear_image_cache(sel_bnum, _riser)
+                                st.info(f"📷 Photo saved — commit and push to make it permanent.")
+                            else:
+                                st.warning("No riser folder set for this building — photo not saved.")
                     else:
                         st.error("Failed to add component.")
 
     with tab_import:
         st.markdown("### Bulk Import from Excel / CSV")
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'SP_Components_Import_Template.xlsx'), 'rb') as _tf:
+            st.download_button("⬇️ Download Import Template (.xlsx)",
+                data=_tf.read(), file_name="SP_Components_Import_Template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key='sp_tmpl_dl')
         st.info("""**Expected columns:**
         `BUILDING` (building number), `FLOOR`, `ROOM`, `SYSTEM TYPE`, `COMPONENT`, 
         `ADDRESS` (optional), `Reference` (optional)
