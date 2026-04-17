@@ -1686,6 +1686,33 @@ elif page == "📋  SP New Inspection":
 
     sel_bnum = sel_label.split(' — ')[0]
 
+    # ── 3rd Party Inspection ──────────────────────────────────────────────
+    is_3rd_party = st.checkbox("🏢 This inspection was performed by a 3rd party contractor", key='sp_3rd_party')
+    if is_3rd_party:
+        st.markdown('<div style="background:#f0f9ff;border-left:4px solid #0369a1;padding:12px 16px;'
+                    'border-radius:0 8px 8px 0;margin-bottom:12px">', unsafe_allow_html=True)
+        tp1, tp2, tp3 = st.columns(3)
+        with tp1:
+            tp_company = st.text_input("Company Name *", key='sp_tp_company',
+                                        placeholder="e.g. Western States Fire Protection")
+        with tp2:
+            tp_date = st.date_input("Date Performed", value=date.today(), key='sp_tp_date')
+        with tp3:
+            tp_contact = st.text_input("Contact / Tech Name", key='sp_tp_contact',
+                                        placeholder="e.g. Mike Johnson")
+
+        tp4, tp5 = st.columns(2)
+        with tp4:
+            tp_wo = st.text_input("Work Order / PO #", key='sp_tp_wo',
+                                   placeholder="PO-2026-XXX")
+        with tp5:
+            tp_report = st.file_uploader("Upload 3rd Party Report (PDF/Image)",
+                                          type=['pdf','jpg','jpeg','png'],
+                                          key='sp_tp_report')
+        if tp_report:
+            st.success(f"📎 Attached: {tp_report.name} ({tp_report.size/1024:.0f} KB)")
+        st.markdown('</div>', unsafe_allow_html=True)
+
 
     # Show print button if last inspection was just saved
     if 'sp_print_data' in st.session_state:
@@ -1867,17 +1894,34 @@ elif page == "📋  SP New Inspection":
                                     placeholder="Overall condition, observations…")
 
         if st.button("💾 Save Inspection Report", type="primary", key='sp_save'):
-            if not inspector:
+            if not inspector and not is_3rd_party:
                 st.error("Please enter inspector name before saving.")
+            elif is_3rd_party and not tp_company:
+                st.error("Please enter the 3rd party company name.")
             else:
+                # Build inspector name — include 3rd party info if applicable
+                if is_3rd_party:
+                    _insp_name = f"{tp_contact or tp_company}" if tp_contact else tp_company
+                    _tp_note = f"3rd Party: {tp_company}"
+                    if tp_contact: _tp_note += f" ({tp_contact})"
+                    if tp_wo: _tp_note += f" | WO: {tp_wo}"
+                    _tp_note += f" | Performed: {tp_date}"
+                    _notes_combined = f"{_tp_note}\n{sp_notes}" if sp_notes else _tp_note
+                else:
+                    _insp_name = inspector
+                    _notes_combined = sp_notes
+
                 header = {
                     'bldg_num':       sel_bnum,
                     'bldg_name':      st.session_state.get('sp_bname',''),
                     'freq_type':      st.session_state.get('sp_freq_val',''),
-                    'inspection_date': str(insp_date),
-                    'inspector_name': inspector,
+                    'inspection_date': str(tp_date if is_3rd_party else insp_date),
+                    'inspector_name': _insp_name,
                     'overall_result': overall,
-                    'notes':          sp_notes,
+                    'notes':          _notes_combined,
+                    'is_third_party': is_3rd_party,
+                    'third_party_company': tp_company if is_3rd_party else None,
+                    'third_party_wo': tp_wo if is_3rd_party else None,
                 }
                 save_items = [{k: it.get(k,'') for k in
                     ['component','system_type','floor','room','reference',
@@ -1886,14 +1930,29 @@ elif page == "📋  SP New Inspection":
                 with st.spinner("Saving..."):
                     insp_id = dbs.save_sprinkler_inspection(header, save_items)
                 if insp_id:
-                    # Update schedule status
-                    sched = dbs.get_sprinkler_schedule(
-                        month=date.today().strftime('%B'),
+                    # Update schedule status — check ALL months, not just current
+                    all_sched = dbs.get_sprinkler_schedule(
                         freq_type=st.session_state.get('sp_freq_val',''))
-                    for s in sched:
-                        if str(s.get('bldg_num')) == sel_bnum:
+                    for s in (all_sched or []):
+                        if str(s.get('bldg_num')) == sel_bnum and s.get('status') != 'Complete':
+                            _insp_dt = str(tp_date if is_3rd_party else insp_date)
                             dbs.update_sprinkler_schedule_status(
-                                s['id'], 'Complete', str(insp_date))
+                                s['id'], 'Complete', _insp_dt)
+
+                    # Save 3rd party report file if uploaded
+                    if is_3rd_party and tp_report:
+                        try:
+                            _rpt_dir = os.path.join(
+                                os.path.dirname(os.path.abspath(__file__)),
+                                "reports", "sprinkler", sel_bnum)
+                            os.makedirs(_rpt_dir, exist_ok=True)
+                            _rpt_ext = tp_report.name.rsplit('.',1)[-1].lower()
+                            _rpt_name = f"SP_{sel_bnum}_{tp_company.replace(' ','_')}_{tp_date}.{_rpt_ext}"
+                            with open(os.path.join(_rpt_dir, _rpt_name), 'wb') as _rf:
+                                _rf.write(tp_report.read())
+                            st.info(f"📎 Report saved: {_rpt_name}")
+                        except Exception as _e:
+                            st.warning(f"Report file couldn't be saved locally: {_e}")
                     st.success(f"✅ Inspection saved (ID #{insp_id})")
                     # Store for print
                     st.session_state['last_print_type'] = 'sp'
@@ -1901,12 +1960,14 @@ elif page == "📋  SP New Inspection":
                         'bldg_num':   sel_bnum,
                         'bldg_name':  st.session_state.get('sp_bname',''),
                         'freq_type':  st.session_state.get('sp_freq_val',''),
-                        'date':       str(insp_date),
-                        'inspector':  inspector,
+                        'date':       str(tp_date if is_3rd_party else insp_date),
+                        'inspector':  _insp_name,
                         'result':     overall,
-                        'notes':      sp_notes,
+                        'notes':      _notes_combined,
                         'items':      save_items,
                         'insp_id':    insp_id,
+                        'is_third_party': is_3rd_party,
+                        'third_party_company': tp_company if is_3rd_party else None,
                     }
                     del st.session_state['sp_items']
                     st.rerun()
