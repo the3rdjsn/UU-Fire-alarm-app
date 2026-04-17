@@ -246,89 +246,103 @@ with st.sidebar:
     st.markdown("""<div style="font-size:11px;font-weight:700;text-align:center;color:#aaa;line-height:1.4;padding:2px 4px">Solving Problems, You Didn't Know You Had<br>in Ways You Wouldn't Understand<br><span style="font-weight:400">Since 2014</span></div>""", unsafe_allow_html=True)
     st.divider()
 
-    # ── Navigation — headers are NOT in the radio list ────────────────────
-    NAV_PAGES = [
-        "📊  Dashboard",
-        "🏛️  Buildings",
-        "🗺️  Campus Map",
-        "➕  Add / Import Buildings",
-        "📅  Schedule",
-        "📋  New Inspection",
-        "📁  Inspection History",
-        "🔍  Device Inventory",
-        "➕  Add / Import FA Devices",
-        "📅  SP Schedule",
-        "📋  SP New Inspection",
-        "📁  SP Inspection History",
-        "🔧  SP Component Inventory",
-        "➕  Add / Import SP Components",
-        "⚠️  Deficiency Tracker",
-        "📈  Analytics",
-        "📥  Export Reports",
-        "🖨️  Print Report",
+    # ── Build sidebar with section headers as static text ─────────────────
+    # Define sections: (header_text, [page_names])
+    _NAV_SECTIONS = [
+        (None, [
+            "📊  Dashboard",
+            "🏛️  Buildings",
+            "🗺️  Campus Map",
+            "➕  Add / Import Buildings",
+        ]),
+        ("🔥  FIRE ALARM", [
+            "📅  Schedule",
+            "📋  New Inspection",
+            "📁  Inspection History",
+            "🔍  Device Inventory",
+            "➕  Add / Import FA Devices",
+        ]),
+        ("🚿  SPRINKLER", [
+            "📅  SP Schedule",
+            "📋  SP New Inspection",
+            "📁  SP Inspection History",
+            "🔧  SP Component Inventory",
+            "➕  Add / Import SP Components",
+        ]),
+        ("🛠️  TOOLS", [
+            "⚠️  Deficiency Tracker",
+            "📈  Analytics",
+            "📥  Export Reports",
+        ]),
+        ("🖨️  PRINT", [
+            "🖨️  Print Report",
+        ]),
     ]
 
-    # Section header positions — which page index each header appears BEFORE
-    SECTION_HEADERS = {
-        4:  "🔥  FIRE ALARM",
-        9:  "🚿  SPRINKLER",
-        14: "🛠️  TOOLS",
-        17: "🖨️  PRINT",
-    }
-
-    # Also keep NAV_OPTIONS for backward compat with nav_target
-    NAV_OPTIONS = NAV_PAGES
+    # Flat list of all navigable pages
+    NAV_PAGES = []
+    for _, pages in _NAV_SECTIONS:
+        NAV_PAGES.extend(pages)
+    NAV_OPTIONS = NAV_PAGES  # backward compat
 
     # Programmatic navigation
     if 'nav_target' in st.session_state:
         target = st.session_state.pop('nav_target')
         if target in NAV_PAGES:
-            st.session_state['nav_radio'] = target
+            st.session_state['nav_page'] = target
 
-    # Style section headers
+    # Default
+    if 'nav_page' not in st.session_state:
+        st.session_state['nav_page'] = "📊  Dashboard"
+
+    # Render each section
+    for hdr, pages in _NAV_SECTIONS:
+        if hdr:
+            st.markdown(
+                f'<p style="font-size:10px;font-weight:700;letter-spacing:0.08em;'
+                f'color:#666;margin:12px 0 2px 0;padding-top:8px;'
+                f'border-top:1px solid #333">{hdr}</p>',
+                unsafe_allow_html=True)
+        for p in pages:
+            is_active = st.session_state.get('nav_page') == p
+            if st.button(
+                p,
+                key=f"nav_{p}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state['nav_page'] = p
+                st.rerun()
+
+    page = st.session_state.get('nav_page', "📊  Dashboard")
+
+    # Style nav buttons to look like a nav list
     st.markdown("""<style>
-    .sidebar-section-hdr {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        color: #666;
-        padding: 10px 0 2px 12px;
-        margin: 0;
+    /* Make sidebar nav buttons compact */
+    [data-testid="stSidebar"] .stButton > button {
+        padding: 4px 10px !important;
+        font-size: 13px !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        border: none !important;
+        border-radius: 6px !important;
+        margin: 1px 0 !important;
+        min-height: 32px !important;
+        height: auto !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+        background: transparent !important;
+        color: #e0e0e0 !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+        background: rgba(204,41,41,0.15) !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: rgba(204,41,41,0.25) !important;
+        color: #fff !important;
+        font-weight: 600 !important;
     }
     </style>""", unsafe_allow_html=True)
-
-    # Build the sidebar: render headers as markdown BETWEEN radio groups
-    # Since Streamlit only allows one radio per key, we render headers
-    # as markdown and use a single radio for all pages (without headers in it)
-    for idx, hdr in sorted(SECTION_HEADERS.items()):
-        pass  # We'll inject these via CSS position trick below
-
-    # Render the single radio with just pages (no headers)
-    page = st.radio("Navigation", NAV_PAGES,
-                    key='nav_radio',
-                    label_visibility="collapsed")
-
-    # Inject section headers via CSS nth-child targeting
-    # Each radio label is a <label> inside the stRadio container
-    # We insert headers using ::before pseudo-elements on the correct labels
-    _hdr_css = ""
-    for idx, hdr in sorted(SECTION_HEADERS.items()):
-        # nth-child is 1-indexed, and each radio option is a label
-        nth = idx + 1
-        _hdr_css += f"""
-    div[data-testid="stRadio"] label:nth-child({nth})::before {{
-        content: "{hdr}";
-        display: block;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        color: #666;
-        padding: 10px 0 4px 0;
-        margin-top: 4px;
-        border-top: 1px solid #333;
-    }}"""
-
-    st.markdown(f"<style>{_hdr_css}</style>", unsafe_allow_html=True)
 
 
 
