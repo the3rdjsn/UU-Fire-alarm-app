@@ -524,18 +524,16 @@ if page == "🏛️  Buildings":
                         with open(_map_path, 'rb') as _f:
                             _pdf_b64 = _b64.b64encode(_f.read()).decode()
                         _fname = os.path.basename(_map_path)
-                        # Render PDF inline inside component iframe
-                        _cv1.html(f"""<!DOCTYPE html><html><body style="margin:0;padding:0">
-                        <object data="data:application/pdf;base64,{_pdf_b64}"
-                            type="application/pdf" width="100%" height="780px">
-                            <p style="padding:20px;font-family:sans-serif">
-                            PDF viewer not supported. 
-                            <a href="data:application/pdf;base64,{_pdf_b64}" 
-                               download="{_fname}">Download {_fname}</a>
-                            </p>
-                        </object>
-                        </body></html>""", height=800, scrolling=True)
-                        st.caption(f"📄 {_fname}")
+                        # Download button — browser opens PDF automatically
+                        st.download_button(
+                            label=f"🗺️ Open Device Map — {_fname}",
+                            data=_pdf_bytes,
+                            file_name=_fname,
+                            mime="application/pdf",
+                            key=f"map_dl_{sel_num}",
+                            use_container_width=True,
+                            type="primary")
+                        st.caption("Click to open — your browser will display the PDF")
                     else:
                         st.info("No device map on file for this building.")
 
@@ -2513,14 +2511,18 @@ elif page == "➕  Add / Import SP Components":
         c7, c8, c9 = st.columns(3)
         with c7:
             sp_comp = st.selectbox("Component *", [""] + _all_comp_types, key="add_sp_comp_sel")
+        # Auto-fill NFPA reference when component changes
+        _auto_ref = _nfpa_ref.get(sp_comp, '') if sp_comp else ''
+        if _auto_ref and st.session_state.get('_last_comp_sel') != sp_comp:
+            st.session_state['add_sp_ref_input'] = _auto_ref
+            st.session_state['_last_comp_sel'] = sp_comp
         with c8:
-            _auto_ref = _nfpa_ref.get(sp_comp, '') if sp_comp else ''
-            sp_ref = st.text_input("NFPA Reference", value=_auto_ref, key="add_sp_ref_input")
+            sp_ref = st.text_input("NFPA Reference", key="add_sp_ref_input")
         with c9:
             sp_address = st.text_input("Address / Index", key="add_sp_addr")
 
         if _auto_ref:
-            st.caption(f"📖 Reference auto-filled from NFPA 25 standards for {sp_comp}")
+            st.caption(f"📖 NFPA 25 ref for {sp_comp}: **{_auto_ref}**")
 
         # ── Photo ─────────────────────────────────────────────────────────────
         sp_photo = st.file_uploader("Component Photo (optional)", type=['jpg','jpeg','png'],
