@@ -520,18 +520,22 @@ if page == "🏛️  Buildings":
 
                     if _map_path:
                         import base64 as _b64
+                        import streamlit.components.v1 as _cv1
                         with open(_map_path, 'rb') as _f:
                             _pdf_b64 = _b64.b64encode(_f.read()).decode()
                         _fname = os.path.basename(_map_path)
-                        st.markdown(
-                            f'''<a href="data:application/pdf;base64,{_pdf_b64}"
-                            target="_blank"
-                            style="display:inline-block;background:#CC2929;color:white;
-                            padding:10px 20px;border-radius:8px;text-decoration:none;
-                            font-weight:700;font-size:14px;font-family:sans-serif">
-                            🗺️ Open Device Map — {_fname}
-                            </a>''',
-                            unsafe_allow_html=True)
+                        _cv1.html(f"""
+                        <button onclick="(function(){{
+                            var b64='{_pdf_b64}';
+                            var bin=atob(b64),arr=new Uint8Array(bin.length);
+                            for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+                            var blob=new Blob([arr],{{type:'application/pdf'}});
+                            window.parent.open(URL.createObjectURL(blob),'_blank');
+                        }})()" style="background:#CC2929;color:white;border:none;
+                        padding:10px 20px;border-radius:8px;font-weight:700;
+                        font-size:14px;cursor:pointer;font-family:sans-serif;width:100%">
+                        🗺️ Open Device Map — {_fname}
+                        </button>""", height=50)
                     else:
                         st.info("No device map on file for this building.")
 
