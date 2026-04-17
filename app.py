@@ -519,16 +519,19 @@ if page == "🏛️  Buildings":
                                 break
 
                     if _map_path:
+                        import base64 as _b64
                         with open(_map_path, 'rb') as _f:
-                            _pdf_bytes = _f.read()
-                        st.download_button(
-                            label=f"🗺️ Open Device Map — {os.path.basename(_map_path)}",
-                            data=_pdf_bytes,
-                            file_name=os.path.basename(_map_path),
-                            mime="application/pdf",
-                            key=f"map_dl_{sel_num}",
-                            use_container_width=True)
-                        st.caption("Opens in your browser's PDF viewer")
+                            _pdf_b64 = _b64.b64encode(_f.read()).decode()
+                        _fname = os.path.basename(_map_path)
+                        st.markdown(
+                            f'''<a href="data:application/pdf;base64,{_pdf_b64}"
+                            target="_blank"
+                            style="display:inline-block;background:#CC2929;color:white;
+                            padding:10px 20px;border-radius:8px;text-decoration:none;
+                            font-weight:700;font-size:14px;font-family:sans-serif">
+                            🗺️ Open Device Map — {_fname}
+                            </a>''',
+                            unsafe_allow_html=True)
                     else:
                         st.info("No device map on file for this building.")
 
