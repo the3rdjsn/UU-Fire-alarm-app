@@ -246,83 +246,89 @@ with st.sidebar:
     st.markdown("""<div style="font-size:11px;font-weight:700;text-align:center;color:#aaa;line-height:1.4;padding:2px 4px">Solving Problems, You Didn't Know You Had<br>in Ways You Wouldn't Understand<br><span style="font-weight:400">Since 2014</span></div>""", unsafe_allow_html=True)
     st.divider()
 
-    NAV_OPTIONS = [
+    # ── Navigation — headers are NOT in the radio list ────────────────────
+    NAV_PAGES = [
         "📊  Dashboard",
-        # Buildings (unified)
         "🏛️  Buildings",
         "🗺️  Campus Map",
         "➕  Add / Import Buildings",
-        # Fire Alarm
-        "🔥  ─── Fire Alarm ───",
         "📅  Schedule",
         "📋  New Inspection",
         "📁  Inspection History",
         "🔍  Device Inventory",
         "➕  Add / Import FA Devices",
-        # Sprinkler
-        "🚿  ─── Sprinkler ───",
         "📅  SP Schedule",
         "📋  SP New Inspection",
         "📁  SP Inspection History",
         "🔧  SP Component Inventory",
         "➕  Add / Import SP Components",
-        # Tools
-        "🛠️  ─── Tools ───",
         "⚠️  Deficiency Tracker",
         "📈  Analytics",
         "📥  Export Reports",
-        # Print
-        "🖨️  ─── Print ───",
         "🖨️  Print Report",
     ]
 
-    # Pages that are just section headers — not navigable
-    NAV_HEADERS = {
-        "🔥  ─── Fire Alarm ───",
-        "🚿  ─── Sprinkler ───",
-        "🖨️  ─── Print ───",
-        "🛠️  ─── Tools ───",
+    # Section header positions — which page index each header appears BEFORE
+    SECTION_HEADERS = {
+        4:  "🔥  FIRE ALARM",
+        9:  "🚿  SPRINKLER",
+        14: "🛠️  TOOLS",
+        17: "🖨️  PRINT",
     }
+
+    # Also keep NAV_OPTIONS for backward compat with nav_target
+    NAV_OPTIONS = NAV_PAGES
 
     # Programmatic navigation
     if 'nav_target' in st.session_state:
         target = st.session_state.pop('nav_target')
-        if target in NAV_OPTIONS and target not in NAV_HEADERS:
+        if target in NAV_PAGES:
             st.session_state['nav_radio'] = target
 
-    # Custom sidebar rendering — headers not selectable
+    # Style section headers
     st.markdown("""<style>
-    /* Style section header radio options as non-clickable labels */
-    div[data-testid="stRadio"] label:has(input[value*="───"]) {
-        pointer-events: none !important;
-        opacity: 1 !important;
-        color: #888 !important;
-        font-size: 11px !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.05em !important;
-        text-transform: uppercase !important;
-        padding-top: 10px !important;
-    }
-    div[data-testid="stRadio"] label:has(input[value*="───"]) > div:first-child {
-        display: none !important;
+    .sidebar-section-hdr {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #666;
+        padding: 10px 0 2px 12px;
+        margin: 0;
     }
     </style>""", unsafe_allow_html=True)
 
-    # Pre-check: if session has a header selected, revert to previous page (not Dashboard)
-    if st.session_state.get('nav_radio') in NAV_HEADERS:
-        # Revert to the last valid page, or Dashboard if none
-        st.session_state['nav_radio'] = st.session_state.get('_last_valid_page', "📊  Dashboard")
+    # Build the sidebar: render headers as markdown BETWEEN radio groups
+    # Since Streamlit only allows one radio per key, we render headers
+    # as markdown and use a single radio for all pages (without headers in it)
+    for idx, hdr in sorted(SECTION_HEADERS.items()):
+        pass  # We'll inject these via CSS position trick below
 
-    page = st.radio("Navigation", NAV_OPTIONS,
+    # Render the single radio with just pages (no headers)
+    page = st.radio("Navigation", NAV_PAGES,
                     key='nav_radio',
                     label_visibility="collapsed")
 
-    # If a header was somehow selected, stay on current page
-    if page in NAV_HEADERS:
-        page = st.session_state.get('_last_valid_page', "📊  Dashboard")
-    else:
-        # Track last valid page
-        st.session_state['_last_valid_page'] = page
+    # Inject section headers via CSS nth-child targeting
+    # Each radio label is a <label> inside the stRadio container
+    # We insert headers using ::before pseudo-elements on the correct labels
+    _hdr_css = ""
+    for idx, hdr in sorted(SECTION_HEADERS.items()):
+        # nth-child is 1-indexed, and each radio option is a label
+        nth = idx + 1
+        _hdr_css += f"""
+    div[data-testid="stRadio"] label:nth-child({nth})::before {{
+        content: "{hdr}";
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #666;
+        padding: 10px 0 4px 0;
+        margin-top: 4px;
+        border-top: 1px solid #333;
+    }}"""
+
+    st.markdown(f"<style>{_hdr_css}</style>", unsafe_allow_html=True)
 
 
 
