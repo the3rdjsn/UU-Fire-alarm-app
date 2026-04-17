@@ -495,6 +495,50 @@ if page == "🏛️  Buildings":
                             if v not in ('', None, 0):
                                 st.write(f"**{lbl}:** {v}")
 
+                    # ── Device Map ────────────────────────────────────────────
+                    st.divider()
+                    st.markdown("**Device Map**")
+                    import glob as _glob
+
+                    _maps_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Maps")
+                    _map_path = None
+
+                    if os.path.isdir(_maps_dir):
+                        # Try exact match first, then zero-padded variants
+                        _bnum = str(sel_num)
+                        _candidates = [
+                            os.path.join(_maps_dir, f"{_bnum}.pdf"),
+                            os.path.join(_maps_dir, f"{_bnum.zfill(3)}.pdf"),
+                            os.path.join(_maps_dir, f"{_bnum.zfill(2)}.pdf"),
+                        ]
+                        # Also fuzzy: any pdf starting with the building number
+                        _fuzzy = _glob.glob(os.path.join(_maps_dir, f"{_bnum}*.pdf")) +                                  _glob.glob(os.path.join(_maps_dir, f"{_bnum.zfill(3)}*.pdf"))
+                        for _cp in _candidates + _fuzzy:
+                            if os.path.exists(_cp):
+                                _map_path = _cp
+                                break
+
+                    if _map_path:
+                        st.caption(f"📄 {os.path.basename(_map_path)}")
+                        with open(_map_path, 'rb') as _f:
+                            _pdf_bytes = _f.read()
+                        import base64 as _b64
+                        _pdf_b64 = _b64.b64encode(_pdf_bytes).decode()
+                        st.markdown(
+                            f'''<iframe src="data:application/pdf;base64,{_pdf_b64}"
+                            width="100%" height="600px"
+                            style="border:1px solid #e5e5e5;border-radius:8px">
+                            </iframe>''',
+                            unsafe_allow_html=True)
+                        # Also offer direct download
+                        st.download_button("⬇️ Download Map PDF",
+                            data=_pdf_bytes,
+                            file_name=os.path.basename(_map_path),
+                            mime="application/pdf",
+                            key=f"map_dl_{sel_num}")
+                    else:
+                        st.info("No device map on file for this building.")
+
                 with t_sp:
                     sp_comps = dbm.get_sp_components(b)
                     total = _i(b.get('total_sp_components'))
@@ -1483,7 +1527,7 @@ elif page == "🔍  Device Inventory":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
         <div style="border-left:1px solid #e5e5e5;padding-left:20px">
-          <h1>FocalPoint Device Inventory</h1>
+          <h1>Fire Alarm Device Inventory</h1>
           <p>31,740 device points from Matrix DB · Searchable by building, type, point address</p>
         </div>
     </div>''', unsafe_allow_html=True)
@@ -1495,8 +1539,13 @@ elif page == "🔍  Device Inventory":
         dev_types_list = ['All','SD','HD','PS','DD','WF','TS','Trans','Ext','Beam','Flood','Vesda','Hood','PRE','CO2','AES Panel','AES Zone']
         type_f = st.selectbox("Device Type", dev_types_list)
     with col3:
-        bldg_names = db.get_device_buildings()
-        bldg_f = st.selectbox("Building", ['All'] + bldg_names)
+        # Use master_buildings for full building list (FocalPoint names)
+        _dev_bldgs = dbm.get_master_buildings()
+        _dev_bldgs = dbm.sort_buildings(_dev_bldgs)
+        _dev_fp_opts = [b.get('focalpoint_name','') for b in _dev_bldgs if b.get('focalpoint_name','').strip()]
+        bldg_f = st.selectbox("Building", ['All'] + _dev_fp_opts,
+                              format_func=lambda x: x if x == 'All' else
+                              f"{next((b['bldg_num'] for b in _dev_bldgs if b.get('focalpoint_name')==x), '')} — {x}")
 
     @st.cache_data(ttl=60)
     def load_devices(search, type_f, bldg_f):
