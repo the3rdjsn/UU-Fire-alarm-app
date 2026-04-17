@@ -518,41 +518,23 @@ if page == "🏛️  Buildings":
                                                 key=f"sp_comp_sel_{sel_num}")
 
                         if sel_comp and sel_comp != "— Select —":
-                            # Find matching inventory rows for this building + component
-                            inv_rows = dbs.get_inventory_for_building(sel_num)
-                            matching = [r for r in inv_rows if r.get('component') == sel_comp]
+                            # Fuzzy image search — finds photos even with path mismatches
+                            img_matches = dbm.get_component_images_fuzzy(sel_num, riser_folder, sel_comp)
 
-                            if matching:
-                                # Show image for first match, let user cycle through
-                                img_options = []
-                                for r in matching:
-                                    p = dbm.get_component_image_path(
-                                        bldg_num     = sel_num,
-                                        floor        = r.get('floor',''),
-                                        room         = r.get('room',''),
-                                        system_type  = r.get('system_type',''),
-                                        component    = sel_comp,
-                                        riser_folder = riser_folder
-                                    )
-                                    if p:
-                                        img_options.append((p, r))
-
-                                if img_options:
-                                    if len(img_options) > 1:
-                                        img_idx = st.selectbox(
-                                            f"Location ({len(img_options)} found)",
-                                            range(len(img_options)),
-                                            format_func=lambda i: f"{img_options[i][1].get('floor','')} {img_options[i][1].get('room','')} — {img_options[i][1].get('system_type','')}",
-                                            key=f"sp_img_idx_{sel_num}_{sel_comp}")
-                                    else:
-                                        img_idx = 0
-                                    p, r = img_options[img_idx]
-                                    st.image(p, caption=f"{sel_comp} — {r.get('floor','')} {r.get('room','')} ({r.get('system_type','')})",
-                                             use_container_width=True)
+                            if img_matches:
+                                if len(img_matches) > 1:
+                                    img_idx = st.selectbox(
+                                        f"{len(img_matches)} photo(s) found — select location",
+                                        range(len(img_matches)),
+                                        format_func=lambda i: img_matches[i][1] or f"Photo {i+1}",
+                                        key=f"sp_img_idx_{sel_num}_{sel_comp}")
                                 else:
-                                    st.info(f"No photo on file for {sel_comp}")
+                                    img_idx = 0
+                                p, loc = img_matches[img_idx]
+                                st.image(p, caption=f"{sel_comp} — {loc}",
+                                         use_container_width=True)
                             else:
-                                st.info(f"No inventory records found for {sel_comp}")
+                                st.info(f"No photo on file for {sel_comp}")
 
                         st.divider()
                         # Component count table in two columns
@@ -2075,6 +2057,7 @@ elif page == "🔧  SP Component Inventory":
                 row = df.iloc[inv_rows[0]]
                 _mb = dbm.get_master_building(str(row.get('bldg_num','')))
                 riser_folder = _mb.get('riser_folder','') if _mb else ''
+                # Try exact first, then fuzzy
                 img_path = dbm.get_component_image_path(
                     bldg_num    = row.get('bldg_num',''),
                     floor       = row.get('floor',''),
@@ -2096,13 +2079,21 @@ elif page == "🔧  SP Component Inventory":
                     <b>Component:</b> {row.get('component','')}
                     </div>""", unsafe_allow_html=True)
                 else:
-                    st.markdown(f"""
-                    <div style="background:#f9f9f9;border-radius:6px;padding:40px 12px;
-                    text-align:center;color:#888;font-size:13px">
-                    📷 No photo on file<br>
-                    <span style="font-size:11px">{row.get('component','')} —
-                    {row.get('floor','')} {row.get('room','')}</span>
-                    </div>""", unsafe_allow_html=True)
+                    # Show all fuzzy matches for this component if exact fails
+                    fuzzy = dbm.get_component_images_fuzzy(
+                        row.get('bldg_num',''), riser_folder, row.get('component',''))
+                    if fuzzy:
+                        st.image(fuzzy[0][0],
+                                 caption=f"{row.get('component','')} — {fuzzy[0][1]} (fuzzy match)",
+                                 use_container_width=True)
+                    else:
+                        st.markdown(f"""
+                        <div style="background:#f9f9f9;border-radius:6px;padding:40px 12px;
+                        text-align:center;color:#888;font-size:13px">
+                        📷 No photo on file<br>
+                        <span style="font-size:11px">{row.get('component','')} —
+                        {row.get('floor','')} {row.get('room','')}</span>
+                        </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("""
                 <div style="background:#f9f9f9;border-radius:6px;padding:60px 12px;

@@ -158,46 +158,143 @@ def get_sp_components(b):
 # ── Component Images ──────────────────────────────────────────────────────────
 
 import os as _os
+import re as _re
 
-_REPO_BASE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)))
+_REPO_BASE   = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)))
 _IMAGES_BASE = _os.path.join(_REPO_BASE, "images", "Riser Inventory Pictures")
+
+# Cache: bldg_num -> list of (normalized_key, filepath)
+_img_cache = {}
+
+def _normalize(s):
+    """Lowercase, strip, collapse spaces, remove special chars for fuzzy compare."""
+    if not s: return ''
+    s = str(s).lower().strip()
+    s = _re.sub(r'[^a-z0-9]', '', s)
+    return s
+
+def _score(needle_parts, candidate):
+    """
+    Score how well a candidate filename matches a set of normalized parts.
+    Returns 0-100. Higher = better match.
+    """
+    cand = _normalize(candidate)
+    hits = sum(1 for p in needle_parts if p and p in cand)
+    return int(hits / len(needle_parts) * 100) if needle_parts else 0
+
+def _build_cache(bldg_num, riser_folder):
+    """Walk building image folder and cache all image paths."""
+    key = (str(bldg_num), str(riser_folder))
+    if key in _img_cache:
+        return _img_cache[key]
+    entries = []
+    # Try exact riser_folder first, then walk all district folders if not found
+    candidates = []
+    if riser_folder:
+        d = _os.path.join(_IMAGES_BASE, str(riser_folder), str(bldg_num))
+        candidates.append(d)
+    # Also try all district folders (handles wrong riser_folder)
+    if _os.path.isdir(_IMAGES_BASE):
+        for district in _os.listdir(_IMAGES_BASE):
+            d2 = _os.path.join(_IMAGES_BASE, district, str(bldg_num))
+            if d2 not in candidates:
+                candidates.append(d2)
+    for bldg_dir in candidates:
+        if not _os.path.isdir(bldg_dir):
+            continue
+        for root, dirs, files in _os.walk(bldg_dir):
+            for f in files:
+                if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    full = _os.path.join(root, f)
+                    entries.append((_normalize(f), full))
+        if entries:
+            break  # found images, stop searching
+    _img_cache[key] = entries
+    return entries
 
 def get_component_image_path(bldg_num, floor, room, system_type, component, riser_folder):
     """
-    Returns local file path to a component photo if it exists in the repo,
-    otherwise None.
-    Pattern: images/Riser Inventory Pictures/{riser_folder}/{bldg_num}/{floor} {room}/{bldg_num} {floor} {room} {system_type} {component}.jpg
+    Fuzzy match: find the best image for a component.
+    Tries exact path first, falls back to scored fuzzy search across all
+    images in the building folder.
     """
-    if not riser_folder:
+    if not bldg_num or not component:
         return None
     try:
+        # 1. Try exact path first (fast path)
         folder_room = f"{floor} {room}".strip()
         filename    = f"{bldg_num} {floor} {room} {system_type} {component}.jpg"
-        path = _os.path.join(_IMAGES_BASE, str(riser_folder),
-                             str(bldg_num), folder_room, filename)
-        return path if _os.path.exists(path) else None
-    except:
+        exact = _os.path.join(_IMAGES_BASE, str(riser_folder or ''),
+                              str(bldg_num), folder_room, filename)
+        if _os.path.exists(exact):
+            return exact
+
+        # 2. Fuzzy search across cached image list
+        entries = _build_cache(bldg_num, riser_folder)
+        if not entries:
+            return None
+
+        # Build needle from meaningful parts (skip empty/numeric-only tokens)
+        needle_parts = [_normalize(p) for p in [floor, room, system_type, component] if p]
+        # Component and system_type are highest priority
+        priority     = [_normalize(p) for p in [component, system_type] if p]
+
+        best_path  = None
+        best_score = 0
+        for norm_name, filepath in entries:
+            # Must match component at minimum
+            if not any(p in norm_name for p in priority[:1]):
+                continue
+            score = _score(needle_parts, norm_name)
+            if score > best_score:
+                best_score = score
+                best_path  = filepath
+
+        # Return if reasonably confident (>= 2 parts matched)
+        return best_path if best_score >= 40 else None
+    except Exception as e:
+        print(f"get_component_image_path error: {e}")
         return None
 
 def get_all_component_images(bldg_num, riser_folder):
-    """
-    Return list of all image paths that exist for a given building.
-    Walks the building's image folder.
-    """
-    if not riser_folder:
+    """Return list of all image paths for a building."""
+    if not bldg_num:
         return []
     try:
-        bldg_dir = _os.path.join(_IMAGES_BASE, str(riser_folder), str(bldg_num))
-        if not _os.path.isdir(bldg_dir):
-            return []
-        paths = []
-        for root, dirs, files in _os.walk(bldg_dir):
-            for f in sorted(files):
-                if f.lower().endswith(('.jpg','.jpeg','.png')):
-                    paths.append(_os.path.join(root, f))
-        return paths
+        return [fp for _, fp in _build_cache(bldg_num, riser_folder)]
     except:
         return []
+
+def get_component_images_fuzzy(bldg_num, riser_folder, component):
+    """
+    Return all images for a specific component across all locations in a building.
+    Sorted by best match score descending.
+    """
+    if not bldg_num or not component:
+        return []
+    try:
+        entries  = _build_cache(bldg_num, riser_folder)
+        comp_key = _normalize(component)
+        matches  = []
+        for norm_name, filepath in entries:
+            if comp_key in norm_name:
+                # Extract floor/room from path for display
+                parts = filepath.replace('\\', '/').split('/')
+                loc   = parts[-2] if len(parts) >= 2 else ''
+                matches.append((norm_name, filepath, loc))
+        return [(fp, loc) for _, fp, loc in matches]
+    except Exception as e:
+        print(f"get_component_images_fuzzy error: {e}")
+        return []
+
+def clear_image_cache(bldg_num=None, riser_folder=None):
+    """Clear cached image list (call after new images added)."""
+    global _img_cache
+    if bldg_num:
+        key = (str(bldg_num), str(riser_folder or ''))
+        _img_cache.pop(key, None)
+    else:
+        _img_cache = {}
 
 # ── Add / Import Buildings ────────────────────────────────────────────────────
 
