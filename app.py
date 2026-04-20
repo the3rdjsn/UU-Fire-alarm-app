@@ -964,6 +964,7 @@ if page == "📊  Dashboard":
                 'inspector': insp.get('inspector_name',''),
                 'source': '📱 Mobile' if is_mobile else '💻 Desktop',
                 'source_color': '#3b82f6' if is_mobile else '#888',
+                '_insp': insp,
             })
 
     # SP inspections
@@ -980,6 +981,7 @@ if page == "📊  Dashboard":
                 'inspector': insp.get('inspector_name',''),
                 'source': '📱 Mobile' if is_mobile else '💻 Desktop',
                 'source_color': '#3b82f6' if is_mobile else '#888',
+                '_insp': insp,
             })
 
     # Sort by date descending
@@ -998,7 +1000,7 @@ if page == "📊  Dashboard":
         ac3.metric("🔥 Fire Alarm", _act_fa)
         ac4.metric("🚿 Sprinkler", _act_sp)
 
-        # Activity table
+        # Clickable activity table
         _act_df = pd.DataFrame([{
             'Date':      a['date'],
             'Type':      a['type'],
@@ -1006,9 +1008,105 @@ if page == "📊  Dashboard":
             'Detail':    a['detail'],
             'Inspector': a['inspector'],
             'Source':     a['source'],
-        } for a in _activity[:25]])  # Show latest 25
+        } for a in _activity[:25]])
 
-        st.dataframe(_act_df, use_container_width=True, hide_index=True, height=min(400, len(_act_df)*38+40))
+        _act_sel = st.dataframe(_act_df, use_container_width=True, hide_index=True,
+                                height=min(400, len(_act_df)*38+40),
+                                on_select="rerun", selection_mode="single-row",
+                                key="dash_activity_tbl")
+        _act_rows = _act_sel.get("selection",{}).get("rows",[]) if _act_sel else []
+
+        if _act_rows and _act_rows[0] < len(_activity):
+            _sel_act = _activity[_act_rows[0]]
+            _sel_insp = _sel_act.get('_insp')
+
+            if _sel_insp and 'FA' in _sel_act['type']:
+                # Navigate to FA print report
+                b_data = dbm.get_master_building(str(_sel_insp['bldg_num']))
+                dev_tested_hist = {
+                    code: {'total': _sel_insp.get(f'{code.lower()}_total',0),
+                           'tested': _sel_insp.get(f'{code.lower()}_tested',0),
+                           'status': 'TESTED'}
+                    for code in ['PS','SD','HD','DD','WF','TS','NOTIF','Trans']
+                }
+                aes_hist = {k: _sel_insp.get(f'aes_{v}','—')
+                    for k, v in [('Alarm','alarm'),('Supervisory','supv'),('Trouble','trouble'),
+                                 ('Waterflow','wf'),('Tamper','tamper'),('Duct','duct'),('Fire Ext','ext')]}
+                raw_defs = _sel_insp.get('deficiencies') or '[]'
+                if isinstance(raw_defs, list): _defs = raw_defs
+                else:
+                    try: _defs = json.loads(raw_defs)
+                    except: _defs = []
+
+                _ac1, _ac2, _ac3 = st.columns([1, 1, 1])
+                with _ac1:
+                    if st.button("🖨️ Print Report", key=f"act_print_fa_{_sel_insp['id']}", type="primary",
+                                 use_container_width=True):
+                        st.session_state['last_print_type'] = 'fa'
+                        st.session_state['print_report_data'] = {
+                            'bldg': b_data or {'name': _sel_insp.get('building_name',''), 'bldg_num': _sel_insp.get('bldg_num',''),
+                                               'district':'','address':'','panel_type':'','year_installed':'','panel_location':'',
+                                               'aim_asset':'','gateway_ip':'','focalpoint_name':''},
+                            'date': _sel_insp.get('inspection_date',''),
+                            'wo': _sel_insp.get('work_order',''),
+                            'type': _sel_insp.get('inspection_type',''),
+                            'result': _sel_insp.get('result',''),
+                            'inspector': _sel_insp.get('inspector_name',''),
+                            'aes': aes_hist, 'dev_tested': dev_tested_hist,
+                            'defs': _defs,
+                            'notes': _sel_insp.get('notes',''),
+                            'pct': _sel_insp.get('pct_tested', 0),
+                            'device_results': {},
+                        }
+                        st.session_state.pop('sp_print_data', None)
+                        st.session_state['nav_page'] = '🖨️  Print Report'
+                        st.rerun()
+                with _ac2:
+                    if st.button("📁 View in History", key=f"act_hist_fa_{_sel_insp['id']}",
+                                 use_container_width=True):
+                        st.session_state['nav_page'] = '📁  Inspection History'
+                        st.rerun()
+                with _ac3:
+                    if st.button("🏛️ View Building", key=f"act_bldg_fa_{_sel_insp.get('bldg_num','')}",
+                                 use_container_width=True):
+                        st.session_state['mb_detail_sel'] = f"{_sel_insp.get('bldg_num','')} — {_sel_insp.get('building_name','')}"
+                        st.session_state['nav_page'] = '🏛️  Buildings'
+                        st.rerun()
+
+            elif _sel_insp and 'SP' in _sel_act['type']:
+                # Navigate to SP print report
+                _sp_items = dbs.get_sprinkler_inspection_items(_sel_insp['id'])
+
+                _ac1, _ac2, _ac3 = st.columns([1, 1, 1])
+                with _ac1:
+                    if st.button("🖨️ Print Report", key=f"act_print_sp_{_sel_insp['id']}", type="primary",
+                                 use_container_width=True):
+                        st.session_state['last_print_type'] = 'sp'
+                        st.session_state['sp_print_data'] = {
+                            'bldg_num':   _sel_insp.get('bldg_num',''),
+                            'bldg_name':  _sel_insp.get('bldg_name',''),
+                            'freq_type':  _sel_insp.get('freq_type',''),
+                            'date':       _sel_insp.get('inspection_date',''),
+                            'inspector':  _sel_insp.get('inspector_name',''),
+                            'result':     _sel_insp.get('overall_result',''),
+                            'notes':      _sel_insp.get('notes',''),
+                            'items':      _sp_items or [],
+                            'insp_id':    _sel_insp['id'],
+                        }
+                        st.session_state.pop('print_report_data', None)
+                        st.session_state['nav_page'] = '🖨️  Print Report'
+                        st.rerun()
+                with _ac2:
+                    if st.button("📁 View in History", key=f"act_hist_sp_{_sel_insp['id']}",
+                                 use_container_width=True):
+                        st.session_state['nav_page'] = '📁  SP Inspection History'
+                        st.rerun()
+                with _ac3:
+                    if st.button("🏛️ View Building", key=f"act_bldg_sp_{_sel_insp.get('bldg_num','')}",
+                                 use_container_width=True):
+                        st.session_state['mb_detail_sel'] = f"{_sel_insp.get('bldg_num','')} — {_sel_insp.get('bldg_name','')}"
+                        st.session_state['nav_page'] = '🏛️  Buildings'
+                        st.rerun()
 
         # Show mobile submissions specifically if any
         if _act_mobile > 0:
