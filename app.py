@@ -942,6 +942,88 @@ if page == "📊  Dashboard":
             f'<div style="font-size:28px;font-weight:800;color:{_open_color}">{_def_count}</div>'
             f'</div>', unsafe_allow_html=True)
 
+    # ── Recent Activity — Last 7 Days ─────────────────────────────────────
+    st.markdown('<div class="section-title" style="margin-top:16px">Recent Activity — Last 7 Days</div>', unsafe_allow_html=True)
+
+    _7_days_ago = (date.today() - __import__('datetime').timedelta(days=7)).isoformat()
+
+    # Collect all recent activity
+    _activity = []
+
+    # FA inspections
+    _recent_fa = db.get_inspections()
+    for insp in (_recent_fa or []):
+        if (insp.get('inspection_date','') or '') >= _7_days_ago:
+            is_mobile = 'mobile' in (insp.get('notes','') or '').lower() or \
+                        insp.get('inspector_name','') == 'Mobile Inspector'
+            _activity.append({
+                'date': insp.get('inspection_date',''),
+                'type': '🔥 FA Inspection',
+                'building': f"#{insp.get('bldg_num','')} {insp.get('building_name','')}",
+                'detail': insp.get('result',''),
+                'inspector': insp.get('inspector_name',''),
+                'source': '📱 Mobile' if is_mobile else '💻 Desktop',
+                'source_color': '#3b82f6' if is_mobile else '#888',
+            })
+
+    # SP inspections
+    _recent_sp = dbs.get_sprinkler_inspections()
+    for insp in (_recent_sp or []):
+        if (insp.get('inspection_date','') or '') >= _7_days_ago:
+            is_mobile = 'mobile' in (insp.get('notes','') or '').lower() or \
+                        insp.get('inspector_name','') == 'Mobile Inspector'
+            _activity.append({
+                'date': insp.get('inspection_date',''),
+                'type': '🚿 SP Inspection',
+                'building': f"#{insp.get('bldg_num','')} {insp.get('bldg_name','')}",
+                'detail': f"{insp.get('freq_type','')} — {insp.get('overall_result','')}",
+                'inspector': insp.get('inspector_name',''),
+                'source': '📱 Mobile' if is_mobile else '💻 Desktop',
+                'source_color': '#3b82f6' if is_mobile else '#888',
+            })
+
+    # Sort by date descending
+    _activity.sort(key=lambda x: x['date'], reverse=True)
+
+    if _activity:
+        # Summary pills
+        _act_total = len(_activity)
+        _act_mobile = sum(1 for a in _activity if '📱' in a['source'])
+        _act_fa = sum(1 for a in _activity if 'FA' in a['type'])
+        _act_sp = sum(1 for a in _activity if 'SP' in a['type'])
+
+        ac1, ac2, ac3, ac4 = st.columns(4)
+        ac1.metric("Total Activity", _act_total)
+        ac2.metric("📱 Mobile", _act_mobile)
+        ac3.metric("🔥 Fire Alarm", _act_fa)
+        ac4.metric("🚿 Sprinkler", _act_sp)
+
+        # Activity table
+        _act_df = pd.DataFrame([{
+            'Date':      a['date'],
+            'Type':      a['type'],
+            'Building':  a['building'],
+            'Detail':    a['detail'],
+            'Inspector': a['inspector'],
+            'Source':     a['source'],
+        } for a in _activity[:25]])  # Show latest 25
+
+        st.dataframe(_act_df, use_container_width=True, hide_index=True, height=min(400, len(_act_df)*38+40))
+
+        # Show mobile submissions specifically if any
+        if _act_mobile > 0:
+            with st.expander(f"📱 Mobile Submissions ({_act_mobile})", expanded=False):
+                _mob_df = pd.DataFrame([{
+                    'Date':      a['date'],
+                    'Type':      a['type'],
+                    'Building':  a['building'],
+                    'Detail':    a['detail'],
+                    'Inspector': a['inspector'],
+                } for a in _activity if '📱' in a['source']])
+                st.dataframe(_mob_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No inspection activity in the last 7 days.")
+
 elif page == "📅  Schedule":
     st.markdown(f'''<div class="uu-header">
         <img src="data:image/png;base64,{LOGO_B64}" style="height:58px;object-fit:contain;flex-shrink:0">
