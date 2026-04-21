@@ -4031,17 +4031,49 @@ elif page == "🖨️  Print Report":
             '</tr></thead><tbody>', items_rows, '</tbody></table>',
             '</div>',
 
-            # Signature
+            # Field Photos
             '<div class="rpt-section">',
-            '<div class="rpt-section-title">Certification</div>',
-            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:8px">',
-            '<div><div class="rpt-label">Inspector Signature</div><div class="sig-line"></div><div style="font-size:11px;color:#888">{}</div></div>'.format(sp_pdata.get('inspector','—')),
-            '<div><div class="rpt-label">Date</div><div class="sig-line"></div><div style="font-size:11px;color:#888">{}</div></div>'.format(sp_pdata.get('date','—')),
-            '<div><div class="rpt-label">Reviewed By</div><div class="sig-line"></div><div style="font-size:11px;color:#888">&nbsp;</div></div>',
-            '</div></div>',
-
-            '</div>',  # end print-page
+            '<div class="rpt-section-title">📷 Field Photos</div>',
         ]
+
+        # Load photos for SP inspection
+        try:
+            _sp_insp_id = sp_pdata.get('insp_id')
+            if _sp_insp_id:
+                _sb_client = db.get_supabase_client() if hasattr(db, 'get_supabase_client') else None
+                _sp_photos = []
+                if _sb_client:
+                    _spr = _sb_client.table('inspection_photos').select('*').eq('inspection_type', 'sp').eq('inspection_id', _sp_insp_id).execute()
+                    _sp_photos = _spr.data if _spr and _spr.data else []
+                if _sp_photos:
+                    html_parts.append('<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">')
+                    for _ph in _sp_photos:
+                        html_parts.append(
+                            '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
+                            '<img src="{}" style="width:100%;max-height:200px;object-fit:cover">'.format(_ph.get('photo_data',''))
+                            + '<div style="padding:6px 8px;font-size:11px;color:#555">'
+                            '<b>{}</b> {}'.format(_ph.get('device_type',''), _ph.get('description',''))
+                            + '<br><span style="color:#888">{}</span></div></div>'.format(
+                                _ph.get('captured_at','')[:16] if _ph.get('captured_at') else ''))
+                    html_parts.append('</div>')
+                else:
+                    html_parts.append('<p style="color:#888;font-style:italic;font-size:12px">No field photos attached.</p>')
+            else:
+                html_parts.append('<p style="color:#888;font-style:italic;font-size:12px">No field photos attached.</p>')
+        except Exception as _pe:
+            html_parts.append(f'<p style="color:#888;font-style:italic;font-size:12px">Photos not available</p>')
+
+        html_parts.append('</div>')
+
+        # Signature
+        html_parts.append('<div class="rpt-section">')
+        html_parts.append('<div class="rpt-section-title">Certification</div>')
+        html_parts.append('<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:8px">')
+        html_parts.append('<div><div class="rpt-label">Inspector Signature</div><div class="sig-line"></div><div style="font-size:11px;color:#888">{}</div></div>'.format(sp_pdata.get('inspector','—')))
+        html_parts.append('<div><div class="rpt-label">Date</div><div class="sig-line"></div><div style="font-size:11px;color:#888">{}</div></div>'.format(sp_pdata.get('date','—')))
+        html_parts.append('<div><div class="rpt-label">Reviewed By</div><div class="sig-line"></div><div style="font-size:11px;color:#888">&nbsp;</div></div>')
+        html_parts.append('</div></div>')
+        html_parts.append('</div>')  # end print-page
 
         st.markdown(''.join(html_parts), unsafe_allow_html=True)
 
@@ -4266,23 +4298,55 @@ elif page == "🖨️  Print Report":
         def_html,
         '</div>',
 
-        # Notes
+        # Field Photos
         '<div class="rpt-section">',
-        '<div class="rpt-section-title">Notes &amp; Summary</div>',
-        '<p style="font-size:12px;color:#444;line-height:1.6">{}</p>'.format(rdata.get('notes','') or 'No additional notes.'),
-        '<p style="font-size:11px;color:#888;margin-top:10px;font-style:italic">The fire alarm system has been tested in accordance with NFPA 72 (2016), IFC 2018, and Utah Fire Code R7-10.</p>',
-        '</div>',
-
-        # Signatures
-        '<div class="rpt-section">',
-        '<div class="rpt-section-title">Signatures</div>',
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:12px">',
-        '<div><div class="sig-line"></div><div style="font-size:11px;color:#888">Inspector Signature &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Date</div></div>',
-        '<div><div class="sig-line"></div><div style="font-size:11px;color:#888">Print Name &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Certification #</div></div>',
-        '</div></div>',
-
-        '</div>',  # /print-page
+        '<div class="rpt-section-title">📷 Field Photos</div>',
     ]
+
+    # Load photos from inspection_photos table
+    try:
+        _insp_id = rdata.get('_insp_id') or rdata.get('insp_id')
+        if _insp_id:
+            _sb = db.get_supabase_client() if hasattr(db, 'get_supabase_client') else None
+            _photos = []
+            if _sb:
+                _pr = _sb.table('inspection_photos').select('*').eq('inspection_type', 'fa').eq('inspection_id', _insp_id).execute()
+                _photos = _pr.data if _pr and _pr.data else []
+            if _photos:
+                html_parts.append('<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">')
+                for _ph in _photos:
+                    html_parts.append(
+                        '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
+                        '<img src="{}" style="width:100%;max-height:200px;object-fit:cover">'.format(_ph.get('photo_data',''))
+                        + '<div style="padding:6px 8px;font-size:11px;color:#555">'
+                        '<b>{}</b> {}'.format(_ph.get('device_type',''), _ph.get('description',''))
+                        + '<br><span style="color:#888">{}</span></div></div>'.format(
+                            _ph.get('captured_at','')[:16] if _ph.get('captured_at') else ''))
+                html_parts.append('</div>')
+            else:
+                html_parts.append('<p style="color:#888;font-style:italic;font-size:12px">No field photos attached.</p>')
+        else:
+            html_parts.append('<p style="color:#888;font-style:italic;font-size:12px">No field photos attached.</p>')
+    except Exception as _pe:
+        html_parts.append(f'<p style="color:#888;font-style:italic;font-size:12px">Photos not available</p>')
+
+    html_parts.append('</div>')
+
+    # Notes
+    html_parts.append('<div class="rpt-section">')
+    html_parts.append('<div class="rpt-section-title">Notes &amp; Summary</div>')
+    html_parts.append('<p style="font-size:12px;color:#444;line-height:1.6">{}</p>'.format(rdata.get('notes','') or 'No additional notes.'))
+    html_parts.append('<p style="font-size:11px;color:#888;margin-top:10px;font-style:italic">The fire alarm system has been tested in accordance with NFPA 72 (2016), IFC 2018, and Utah Fire Code R7-10.</p>')
+    html_parts.append('</div>')
+
+    # Signatures
+    html_parts.append('<div class="rpt-section">')
+    html_parts.append('<div class="rpt-section-title">Signatures</div>')
+    html_parts.append('<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:12px">')
+    html_parts.append('<div><div class="sig-line"></div><div style="font-size:11px;color:#888">Inspector Signature &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Date</div></div>')
+    html_parts.append('<div><div class="sig-line"></div><div style="font-size:11px;color:#888">Print Name &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Certification #</div></div>')
+    html_parts.append('</div></div>')
+    html_parts.append('</div>')  # /print-page
 
     st.markdown('\n'.join(html_parts), unsafe_allow_html=True)
 
