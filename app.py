@@ -2352,22 +2352,46 @@ elif page == "📁  SP Inspection History":
                     st.error(f"⚠️ {len(fails)} deficiencies found:")
                     for f in fails:
                         st.write(f"• **{f['component']}** ({f.get('floor','')} {f.get('room','')}) — {f.get('comments','')}")
-            if st.button("🖨️ Print This Report", key=f"sp_hist_print_{insp['id']}", type="primary"):
-                st.session_state['last_print_type'] = 'sp'
-                st.session_state['sp_print_data'] = {
-                'bldg_num':   insp.get('bldg_num',''),
-                'bldg_name':  insp.get('bldg_name',''),
-                'freq_type':  insp.get('freq_type',''),
-                'date':       insp.get('inspection_date',''),
-                'inspector':  insp.get('inspector_name',''),
-                'result':     insp.get('overall_result',''),
-                'notes':      insp.get('notes',''),
-                'items':      items if items else [],
-                'insp_id':    insp['id'],
-                }
-                st.session_state.pop('print_report_data', None)
-                st.session_state['nav_target'] = '🖨️  Print Report'
-                st.rerun()
+            _sph1, _sph2 = st.columns([1, 1])
+            with _sph1:
+                if st.button("🖨️ Print This Report", key=f"sp_hist_print_{insp['id']}", type="primary",
+                             use_container_width=True):
+                    st.session_state['last_print_type'] = 'sp'
+                    st.session_state['sp_print_data'] = {
+                    'bldg_num':   insp.get('bldg_num',''),
+                    'bldg_name':  insp.get('bldg_name',''),
+                    'freq_type':  insp.get('freq_type',''),
+                    'date':       insp.get('inspection_date',''),
+                    'inspector':  insp.get('inspector_name',''),
+                    'result':     insp.get('overall_result',''),
+                    'notes':      insp.get('notes',''),
+                    'items':      items if items else [],
+                    'insp_id':    insp['id'],
+                    }
+                    st.session_state.pop('print_report_data', None)
+                    st.session_state['nav_target'] = '🖨️  Print Report'
+                    st.rerun()
+            with _sph2:
+                if st.button("🗑 Delete", key=f"sp_hist_del_{insp['id']}",
+                             use_container_width=True):
+                    # Delete inspection items first, then the inspection
+                    try:
+                        dbs.delete_sprinkler_inspection(insp['id'])
+                        st.success("Deleted")
+                        st.rerun()
+                    except Exception as _de:
+                        # Fallback — try direct Supabase delete
+                        try:
+                            _sb_del = db.get_supabase_client() if hasattr(db, 'get_supabase_client') else None
+                            if _sb_del:
+                                _sb_del.table('sprinkler_inspection_items').delete().eq('inspection_id', insp['id']).execute()
+                                _sb_del.table('sprinkler_inspections').delete().eq('id', insp['id']).execute()
+                                st.success("Deleted")
+                                st.rerun()
+                            else:
+                                st.error(f"Delete failed: {_de}")
+                        except Exception as _de2:
+                            st.error(f"Delete failed: {_de2}")
 
 
 
