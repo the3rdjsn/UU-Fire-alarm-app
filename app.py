@@ -944,28 +944,33 @@ if page == "📊  Dashboard":
         st.plotly_chart(_cfig, use_container_width=True)
 
     with dash_right:
-        st.markdown('<div class="section-title">Quick Actions</div>', unsafe_allow_html=True)
-        if st.button("🗺️ Campus Map", use_container_width=True, key='dash_map'):
-            st.session_state['nav_target'] = '🗺️  Campus Map'
-            st.rerun()
-        if st.button("⚠️ Deficiency Tracker", use_container_width=True, key='dash_def'):
-            st.session_state['nav_target'] = '⚠️  Deficiency Tracker'
-            st.rerun()
-        if st.button("📈 Analytics", use_container_width=True, key='dash_analytics'):
-            st.session_state['nav_target'] = '📈  Analytics'
-            st.rerun()
-        if st.button("📥 Export Reports", use_container_width=True, key='dash_export'):
-            st.session_state['nav_target'] = '📥  Export Reports'
-            st.rerun()
-
-        # Mobile app link
+        # Mobile app link — prominent at top
         st.markdown(
-            '<a href="https://uu-fire-mobile.netlify.app" target="_blank" style="'
-            'display:block;background:#1E2A3A;border:1px solid #2A3A4A;border-radius:12px;'
-            'padding:12px 16px;text-decoration:none;margin-top:8px;text-align:center">'
-            '<div style="font-size:13px;font-weight:700;color:#3B82F6">📱 Mobile Inspection App</div>'
-            '<div style="font-size:11px;color:#8899AA;margin-top:2px">Open on your phone · Add to Home Screen</div>'
+            '<a href="https://uofufiresys.netlify.app" target="_blank" style="'
+            'display:block;background:linear-gradient(135deg, #CC2929 0%, #9E1F1F 100%);'
+            'border-radius:12px;padding:14px 16px;text-decoration:none;margin-bottom:10px;'
+            'text-align:center;box-shadow:0 2px 8px rgba(158,31,31,0.3)">'
+            '<div style="font-size:15px;font-weight:800;color:#fff">📱 Mobile Inspection App</div>'
+            '<div style="font-size:11px;color:rgba(255,255,255,0.7);margin-top:3px">Open on your phone · Add to Home Screen</div>'
             '</a>', unsafe_allow_html=True)
+
+        # Quick actions — 2x2 grid
+        st.markdown('<div class="section-title">Quick Actions</div>', unsafe_allow_html=True)
+        _qa1, _qa2 = st.columns(2)
+        with _qa1:
+            if st.button("🗺️ Map", use_container_width=True, key='dash_map'):
+                st.session_state['nav_target'] = '🗺️  Campus Map'
+                st.rerun()
+            if st.button("📈 Analytics", use_container_width=True, key='dash_analytics'):
+                st.session_state['nav_target'] = '📈  Analytics'
+                st.rerun()
+        with _qa2:
+            if st.button("⚠️ Deficiencies", use_container_width=True, key='dash_def'):
+                st.session_state['nav_target'] = '⚠️  Deficiency Tracker'
+                st.rerun()
+            if st.button("📥 Export", use_container_width=True, key='dash_export'):
+                st.session_state['nav_target'] = '📥  Export Reports'
+                st.rerun()
 
         # Quick deficiency count
         _all_insp = db.get_inspections()
