@@ -10,6 +10,39 @@ import db_supabase as db
 import db_sprinkler as dbs
 import db_master as dbm
 from db_config import validate_db_config, get_db_mode
+
+# ── Direct Supabase client for operations not in db modules ──────────────────
+_raw_sb = None
+def get_raw_supabase():
+    """Get a raw Supabase client directly, bypassing db_supabase module."""
+    global _raw_sb
+    if _raw_sb: return _raw_sb
+    try:
+        from supabase import create_client
+        url = os.environ.get('SUPABASE_URL', '')
+        key = os.environ.get('SUPABASE_KEY', '')
+        if not url:
+            # Try to get from db_config or st.secrets
+            try:
+                url = st.secrets.get('SUPABASE_URL', '') or st.secrets.get('supabase_url', '')
+                key = st.secrets.get('SUPABASE_KEY', '') or st.secrets.get('supabase_key', '')
+            except: pass
+        if not url:
+            # Try from the db module
+            if hasattr(db, 'get_supabase_client'):
+                _raw_sb = db.get_supabase_client()
+                return _raw_sb
+            if hasattr(db, '_sb'):
+                _raw_sb = db._sb
+                return _raw_sb
+            if hasattr(db, 'sb'):
+                _raw_sb = db.sb
+                return _raw_sb
+        if url and key:
+            _raw_sb = create_client(url, key)
+            return _raw_sb
+    except: pass
+    return None
 def get_local_building_image(bldg_num):
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -925,6 +958,15 @@ if page == "📊  Dashboard":
             st.session_state['nav_target'] = '📥  Export Reports'
             st.rerun()
 
+        # Mobile app link
+        st.markdown(
+            '<a href="https://uu-fire-mobile.netlify.app" target="_blank" style="'
+            'display:block;background:#1E2A3A;border:1px solid #2A3A4A;border-radius:12px;'
+            'padding:12px 16px;text-decoration:none;margin-top:8px;text-align:center">'
+            '<div style="font-size:13px;font-weight:700;color:#3B82F6">📱 Mobile Inspection App</div>'
+            '<div style="font-size:11px;color:#8899AA;margin-top:2px">Open on your phone · Add to Home Screen</div>'
+            '</a>', unsafe_allow_html=True)
+
         # Quick deficiency count
         _all_insp = db.get_inspections()
         _def_count = 0
@@ -1121,6 +1163,64 @@ if page == "📊  Dashboard":
                 st.dataframe(_mob_df, use_container_width=True, hide_index=True)
     else:
         st.info("No inspection activity in the last 7 days.")
+
+    # ── Edit Log — Mobile & Desktop Changes ──────────────────────────────
+    st.markdown('<div class="section-title" style="margin-top:16px">📝 Edit Log — Recent Changes</div>', unsafe_allow_html=True)
+    try:
+        _sb_log = get_raw_supabase()
+        if _sb_log:
+            _log_res = _sb_log.table('edit_log').select('*').order('created_at', desc=True).limit(25).execute()
+            _log_data = _log_res.data if _log_res and _log_res.data else []
+            if _log_data:
+                _log_df = pd.DataFrame([{
+                    'Time':     l.get('created_at','')[:16].replace('T',' '),
+                    'Source':   '📱' if l.get('source') == 'mobile' else '💻',
+                    'Action':   l.get('action',''),
+                    'Type':     l.get('entity_type','').replace('_',' ').title(),
+                    'Building': f"#{l.get('bldg_num','')} {l.get('building_name','')}",
+                    'Details':  l.get('details',''),
+                    'By':       l.get('inspector_name',''),
+                } for l in _log_data])
+
+                _log_sel = st.dataframe(_log_df, use_container_width=True, hide_index=True,
+                                         height=min(300, len(_log_df)*38+40),
+                                         on_select="rerun", selection_mode="single-row",
+                                         key="dash_edit_log_tbl")
+                _log_rows = _log_sel.get("selection",{}).get("rows",[]) if _log_sel else []
+
+                if _log_rows and _log_rows[0] < len(_log_data):
+                    _sel_log = _log_data[_log_rows[0]]
+                    _etype = _sel_log.get('entity_type','')
+                    _eid = _sel_log.get('entity_id','')
+
+                    _lc1, _lc2, _lc3 = st.columns(3)
+                    with _lc1:
+                        if 'fa_inspection' in _etype and _eid:
+                            if st.button("📁 View FA Report", key=f"log_fa_{_eid}", use_container_width=True):
+                                st.session_state['nav_page'] = '📁  Inspection History'
+                                st.rerun()
+                        elif 'sp_inspection' in _etype and _eid:
+                            if st.button("📁 View SP Report", key=f"log_sp_{_eid}", use_container_width=True):
+                                st.session_state['nav_page'] = '📁  SP Inspection History'
+                                st.rerun()
+                    with _lc2:
+                        _log_bnum = _sel_log.get('bldg_num','')
+                        if _log_bnum:
+                            if st.button("🏛️ View Building", key=f"log_bldg_{_log_bnum}", use_container_width=True):
+                                st.session_state['mb_detail_sel'] = f"{_log_bnum} — {_sel_log.get('building_name','')}"
+                                st.session_state['nav_page'] = '🏛️  Buildings'
+                                st.rerun()
+                    with _lc3:
+                        if _sel_log.get('field_changed'):
+                            st.caption(f"Changed: **{_sel_log['field_changed']}**\n\n"
+                                       f"Old: `{_sel_log.get('old_value','')}`\n\n"
+                                       f"New: `{_sel_log.get('new_value','')}`")
+            else:
+                st.info("No edit log entries yet. Edits from the mobile app will appear here.")
+        else:
+            st.caption("Edit log requires Supabase connection.")
+    except Exception as _le:
+        st.caption(f"Edit log not available — run create_inspectors_and_log.sql first. ({_le})")
 
 elif page == "📅  Schedule":
     st.markdown(f'''<div class="uu-header">
@@ -2352,6 +2452,61 @@ elif page == "📁  SP Inspection History":
                     st.error(f"⚠️ {len(fails)} deficiencies found:")
                     for f in fails:
                         st.write(f"• **{f['component']}** ({f.get('floor','')} {f.get('room','')}) — {f.get('comments','')}")
+
+            # ── Edit Inspection ───────────────────────────────────────────
+            with st.expander("✏️ Edit This Inspection", expanded=False):
+                _ed1, _ed2, _ed3 = st.columns(3)
+                with _ed1:
+                    _ed_date = st.date_input("Inspection Date",
+                        value=datetime.strptime(insp['inspection_date'], '%Y-%m-%d').date()
+                              if insp.get('inspection_date') else date.today(),
+                        key=f"sp_ed_date_{insp['id']}")
+                with _ed2:
+                    _result_opts = ['PASS', 'PARTIAL — Deficiencies Noted', 'FAIL — Critical Deficiencies']
+                    _cur_result = insp.get('overall_result','PASS')
+                    _ed_result = st.selectbox("Result", _result_opts,
+                        index=_result_opts.index(_cur_result) if _cur_result in _result_opts else 0,
+                        key=f"sp_ed_result_{insp['id']}")
+                with _ed3:
+                    _ed_inspector = st.text_input("Inspector",
+                        value=insp.get('inspector_name',''),
+                        key=f"sp_ed_insp_{insp['id']}")
+
+                _ed4, _ed5 = st.columns(2)
+                with _ed4:
+                    _freq_opts = ['Quarterly','Semiannual','Annual','3-Year','5-Year']
+                    _cur_freq = insp.get('freq_type','Quarterly')
+                    _ed_freq = st.selectbox("Frequency", _freq_opts,
+                        index=_freq_opts.index(_cur_freq) if _cur_freq in _freq_opts else 0,
+                        key=f"sp_ed_freq_{insp['id']}")
+                with _ed5:
+                    _ed_bname = st.text_input("Building Name",
+                        value=insp.get('bldg_name',''),
+                        key=f"sp_ed_bname_{insp['id']}")
+
+                _ed_notes = st.text_area("Notes", value=insp.get('notes',''),
+                    key=f"sp_ed_notes_{insp['id']}", height=80)
+
+                if st.button("💾 Save Changes", key=f"sp_ed_save_{insp['id']}", type="primary"):
+                    try:
+                        _sb_edit = get_raw_supabase()
+                        if _sb_edit:
+                            _sb_edit.table('sprinkler_inspections').update({
+                                'inspection_date': str(_ed_date),
+                                'overall_result': _ed_result,
+                                'inspector_name': _ed_inspector,
+                                'freq_type': _ed_freq,
+                                'bldg_name': _ed_bname,
+                                'notes': _ed_notes,
+                            }).eq('id', insp['id']).execute()
+                            st.success("✅ Updated")
+                            st.rerun()
+                        else:
+                            st.error("Could not connect to Supabase")
+                    except Exception as _ue:
+                        st.error(f"Update failed: {_ue}")
+
+            # ── Print / Delete buttons ────────────────────────────────────
             _sph1, _sph2 = st.columns([1, 1])
             with _sph1:
                 if st.button("🖨️ Print This Report", key=f"sp_hist_print_{insp['id']}", type="primary",
@@ -2374,24 +2529,26 @@ elif page == "📁  SP Inspection History":
             with _sph2:
                 if st.button("🗑 Delete", key=f"sp_hist_del_{insp['id']}",
                              use_container_width=True):
-                    # Delete inspection items first, then the inspection
                     try:
-                        dbs.delete_sprinkler_inspection(insp['id'])
-                        st.success("Deleted")
-                        st.rerun()
+                        _sb_del = get_raw_supabase()
+                        if _sb_del:
+                            # Delete items first, then inspection
+                            _sb_del.table('sprinkler_inspection_items').delete().eq('inspection_id', insp['id']).execute()
+                            _sb_del.table('sprinkler_inspections').delete().eq('id', insp['id']).execute()
+                            # Also delete any photos
+                            try:
+                                _sb_del.table('inspection_photos').delete().eq('inspection_type', 'sp').eq('inspection_id', insp['id']).execute()
+                            except: pass
+                            st.success("Deleted")
+                            st.rerun()
+                        elif hasattr(dbs, 'delete_sprinkler_inspection'):
+                            dbs.delete_sprinkler_inspection(insp['id'])
+                            st.success("Deleted")
+                            st.rerun()
+                        else:
+                            st.error("Could not connect to Supabase for delete. Check db_config.")
                     except Exception as _de:
-                        # Fallback — try direct Supabase delete
-                        try:
-                            _sb_del = db.get_supabase_client() if hasattr(db, 'get_supabase_client') else None
-                            if _sb_del:
-                                _sb_del.table('sprinkler_inspection_items').delete().eq('inspection_id', insp['id']).execute()
-                                _sb_del.table('sprinkler_inspections').delete().eq('id', insp['id']).execute()
-                                st.success("Deleted")
-                                st.rerun()
-                            else:
-                                st.error(f"Delete failed: {_de}")
-                        except Exception as _de2:
-                            st.error(f"Delete failed: {_de2}")
+                        st.error(f"Delete failed: {_de}")
 
 
 
